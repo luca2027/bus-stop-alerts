@@ -96,19 +96,12 @@
     </div>
     <div class="card">
       <div id="map"></div>
-      <p class="muted small" style="margin:8px 0 0">🏫 school pin (drag to fine-tune) &nbsp;•&nbsp; 🍕 Big Taste Pizza (locked in place)</p>
+      <p class="muted small" style="margin:8px 0 0">🏫 school &nbsp;•&nbsp; 🍕 Big Taste Pizza &nbsp;•&nbsp; both fixed in place</p>
     </div>
     <details class="card" id="setupDetails">
       <summary>⚙️ Setup (do once)</summary>
-      <label>School location</label>
-      <div class="row">
-        <button class="bigbtn blue" id="setSchoolBtn" style="font-size:15px;padding:10px">📍 Set school to my current spot</button>
-      </div>
-      <div class="small muted" id="schoolCoords">School pin: not set yet</div>
-      <div class="row">
-        <div><label>School radius (m)</label><input type="number" id="schoolRadius" min="30" max="1000" step="10" value="150"></div>
-        <div><label>Pizza radius (m)</label><input type="number" id="pizzaRadius" min="30" max="1000" step="10" value="100"></div>
-      </div>
+      <div class="small muted" id="schoolCoords"></div>
+      <div class="small muted" style="margin-top:6px">Both locations and their alert zones are fixed — nothing here can be moved from this phone.</div>
       <label>Alert channel (ntfy topic) — same on both phones</label>
       <div class="row">
         <input type="text" id="topicInput" class="mono" spellcheck="false" autocomplete="off">
@@ -344,11 +337,9 @@ function syncTopicInputs(){
   $("watchTopic").value = cfg.topic;
 }
 function refreshSetupLabels(){
-  $("schoolCoords").textContent = (cfg.school.lat != null)
-    ? "School pin: " + cfg.school.lat.toFixed(5) + ", " + cfg.school.lng.toFixed(5)
-    : "School pin: not set yet";
-  $("schoolRadius").value = cfg.school.radius;
-  $("pizzaRadius").value = cfg.pizza.radius;
+  $("schoolCoords").textContent = "🏫 " + SCHOOL_DEFAULT.name + " — " +
+    cfg.school.lat.toFixed(5) + ", " + cfg.school.lng.toFixed(5) +
+    "    •    🍕 " + PIZZA_DEFAULT.name;
 }
 
 function initTrackMap(){
@@ -376,16 +367,11 @@ function drawTrackPins(){
                                iconSize:[28,28], iconAnchor:[14,26]});
   if(cfg.school.lat != null){
     if(!schoolMarker){
-      schoolMarker = L.marker([cfg.school.lat, cfg.school.lng],
-                              {icon:schoolIcon, draggable:true}).addTo(trackMap);
+      /* School pin is intentionally NOT draggable: fixed location,
+         can't be moved on the track phone. */
+      schoolMarker = L.marker([cfg.school.lat, cfg.school.lng], {icon:schoolIcon}).addTo(trackMap);
       schoolMarker.bindTooltip("St. Marguerite d'Youville CES",
         {permanent:true, direction:"top", offset:[0,-28], className:"pinlabel"});
-      schoolMarker.on("dragend", () => {
-        const p = schoolMarker.getLatLng();
-        cfg.school.lat = +p.lat.toFixed(6); cfg.school.lng = +p.lng.toFixed(6);
-        saveCfg(); refreshSetupLabels(); drawTrackPins();
-        trackLog("🏫 School pin moved.");
-      });
     } else schoolMarker.setLatLng([cfg.school.lat, cfg.school.lng]);
     if(!schoolCircle) schoolCircle = L.circle([0,0], {color:"#1a73e8", weight:2, fillOpacity:.08}).addTo(trackMap);
     schoolCircle.setLatLng([cfg.school.lat, cfg.school.lng]).setRadius(cfg.school.radius);
@@ -564,21 +550,6 @@ function onTrackFix(pos){
 }
 
 /* track setup controls */
-$("setSchoolBtn").onclick = () => {
-  ensureAudio();
-  if(!("geolocation" in navigator)){ trackLog("❌ Geolocation not available."); return; }
-  trackLog("📡 Getting current position for the school pin…");
-  navigator.geolocation.getCurrentPosition(p => {
-    cfg.school.lat = +p.coords.latitude.toFixed(6);
-    cfg.school.lng = +p.coords.longitude.toFixed(6);
-    saveCfg(); refreshSetupLabels(); drawTrackPins();
-    if(trackMap) trackMap.setView([cfg.school.lat, cfg.school.lng], 16);
-    trackLog("🏫 School pin set (±" + Math.round(p.coords.accuracy || 0) + "m). Drag it on the map to fine-tune.");
-  }, e => trackLog("⚠️ Couldn't get position: " + (e && e.message ? e.message : e)),
-  { enableHighAccuracy:true, timeout:20000 });
-};
-$("schoolRadius").onchange = e => { cfg.school.radius = Math.max(30, +e.target.value || 150); saveCfg(); drawTrackPins(); };
-$("pizzaRadius").onchange  = e => { cfg.pizza.radius  = Math.max(30, +e.target.value || 100); saveCfg(); drawTrackPins(); };
 $("topicInput").onchange   = e => { cfg.topic = e.target.value.trim() || randTopic(); saveCfg(); syncTopicInputs(); };
 $("regenTopic").onclick    = () => { cfg.topic = randTopic(); saveCfg(); syncTopicInputs(); $("ntfyStatus").textContent = "New channel created — copy the son's link again."; };
 $("copySonLink").onclick = async () => {
