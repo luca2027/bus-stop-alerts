@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pizza Run Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{ --blue:#1a73e8; --green:#1e8e3e; --red:#d93025; --bg:#f6f8fb; }
+  *{ box-sizing:border-box; }
+  body{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+        margin:0; background:var(--bg); color:#202124; }
+  header{ background:#fff; border-bottom:1px solid #e0e0e0; padding:10px 16px;
+          position:sticky; top:0; z-index:1000; display:flex; align-items:center; gap:10px; }
+  header h1{ font-size:18px; margin:0; }
+  header .mode{ margin-left:auto; font-size:13px; color:#5f6368; }
+  main{ padding:12px 12px 40px; max-width:640px; margin:0 auto; }
+  .card{ background:#fff; border:1px solid #e0e0e0; border-radius:12px; padding:14px; margin-bottom:12px; }
+  .bigbtn{ display:block; width:100%; padding:16px; font-size:19px; font-weight:700;
+            border:none; border-radius:12px; cursor:pointer; margin:8px 0; }
+  .start{ background:var(--green); color:#fff; }
+  .stop{ background:var(--red); color:#fff; }
+  .blue{ background:var(--blue); color:#fff; }
+  .ghost{ background:#fff; color:var(--blue); border:2px solid var(--blue); }
+  .bigbtn:disabled{ opacity:.45; cursor:default; }
+  .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .row > *{ flex:1 1 auto; }
+  input[type=text], input[type=number]{ padding:10px; font-size:15px; border:1px solid #c9c9c9;
+            border-radius:8px; width:100%; }
+  label{ font-size:13px; color:#5f6368; display:block; margin:8px 0 4px; }
+  #map, #watchMap{ height:280px; border-radius:12px; border:1px solid #ddd; z-index:1; }
+  .phase{ font-size:22px; font-weight:800; margin:4px 0; }
+  .phase.idle{ color:#5f6368; } .phase.atschool{ color:var(--blue); }
+  .phase.enroute{ color:#e8710a; } .phase.arrived{ color:var(--green); }
+  .muted{ color:#5f6368; } .small{ font-size:13px; }
+  .mono{ font-family:ui-monospace,Menlo,Consolas,monospace; }
+  #trackLog, #watchLog{ list-style:none; padding:0; margin:8px 0 0; max-height:180px; overflow:auto; }
+  #trackLog li, #watchLog li{ padding:7px 4px; border-top:1px solid #eee; font-size:14px; }
+  #trackLog li .t, #watchLog li .t{ color:#5f6368; font-size:12px; margin-right:6px; }
+  details.card summary{ cursor:pointer; font-weight:700; font-size:16px; }
+  #overlay{ position:fixed; inset:0; background:rgba(20,20,20,.82); z-index:2000;
+            display:flex; align-items:center; justify-content:center; padding:20px; }
+  #overlay[hidden]{ display:none; }
+  #overlay .pop{ background:#fff; border-radius:16px; padding:28px 22px; text-align:center; max-width:420px; }
+  #overlay .pop .big{ font-size:30px; font-weight:800; margin:8px 0; }
+  .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+  .dot.on{ background:var(--green); } .dot.off{ background:#c9c9c9; }
+  .howto li{ margin:6px 0; font-size:14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🍕 Pizza Run Tracker</h1>
+  <span class="mode" id="modeLabel"></span>
+</header>
+<main>
+
+  <!-- ============ HOME ============ -->
+  <section id="homeView">
+    <div class="card">
+      <h2 style="margin:0 0 8px">Who's holding this phone?</h2>
+      <button class="bigbtn blue" id="goTrack">📍 I'm going for pizza<br><span class="small" style="font-weight:400">Track my trip (your son's phone)</span></button>
+      <button class="bigbtn ghost" id="goWatch">👀 I'm watching<br><span class="small" style="font-weight:400">Get the arrival alert (your phone)</span></button>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">How it works</h3>
+      <ol class="howto">
+        <li>On <b>your</b> phone open the <b>watch</b> side and copy the <b>son's link</b> (it carries a private alert channel).</li>
+        <li>Send that link to your son. He opens it at school, taps <b>Set school to my current spot</b>, then <b>Start tracking</b> before leaving for lunch.</li>
+        <li>When he leaves school you get a <b>“left school”</b> note; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
+        <li>Keep the track page open on his phone until he arrives (it keeps the screen awake).</li>
+      </ol>
+      <p class="muted small">Alerts travel through ntfy.sh on a random private topic — only someone with the link can see them. No accounts, no app install needed (the ntfy app is optional for extra push backup).</p>
+    </div>
+  </section>
+
+  <!-- ============ TRACK ============ -->
+  <section id="trackView" hidden>
+    <div class="card">
+      <div class="phase idle" id="phaseLabel">Not tracking</div>
+      <div class="small muted" id="statusLine">Press Start tracking before leaving school.</div>
+      <div class="row" style="margin-top:10px">
+        <button class="bigbtn start" id="startBtn">▶ Start tracking</button>
+      </div>
+      <div class="row">
+        <button class="bigbtn ghost" id="rearmBtn" style="font-size:15px;padding:10px" disabled>↺ Re-arm for next trip</button>
+      </div>
+      <ul id="trackLog"></ul>
+    </div>
+    <div class="card">
+      <div id="map"></div>
+      <p class="muted small" style="margin:8px 0 0">🏫 blue pin = school &nbsp;•&nbsp; 🍕 red pin = Big Taste Pizza &nbsp;•&nbsp; drag pins to adjust, or use the setup below.</p>
+    </div>
+    <details class="card" id="setupDetails">
+      <summary>⚙️ Setup (do once)</summary>
+      <label>School location</label>
+      <div class="row">
+        <button class="bigbtn blue" id="setSchoolBtn" style="font-size:15px;padding:10px">📍 Set school to my current spot</button>
+      </div>
+      <div class="small muted" id="schoolCoords">School pin: not set yet</div>
+      <div class="row">
+        <div><label>School radius (m)</label><input type="number" id="schoolRadius" min="30" max="1000" step="10" value="150"></div>
+        <div><label>Pizza radius (m)</label><input type="number" id="pizzaRadius" min="30" max="1000" step="10" value="100"></div>
+      </div>
+      <label>Alert channel (ntfy topic) — same on both phones</label>
+      <div class="row">
+        <input type="text" id="topicInput" class="mono" spellcheck="false" autocomplete="off">
+        <button class="bigbtn ghost" id="regenTopic" style="flex:0 0 auto;font-size:14px;padding:10px">🎲</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="bigbtn blue" id="copySonLink" style="font-size:15px;padding:10px">🔗 Copy my son's link</button>
+      </div>
+      <div class="small muted" id="ntfyStatus"></div>
+    </details>
+    <div class="card">
+      <h3 style="margin:0 0 6px">Good to know</h3>
+      <ul class="howto">
+        <li>Keep this page <b>open in the foreground</b> until arrival — if the browser is closed or the tab killed, tracking stops.</li>
+        <li>The page tries to keep the screen awake. On iPhone, keep the phone charged and glance at it now and then.</li>
+        <li>Arrival needs a decent GPS fix; tall buildings can delay it by a minute or two.</li>
+      </ul>
+      <button class="bigbtn ghost" id="backHome1" style="font-size:15px;padding:10px">← Back</button>
+    </div>
+  </section>
+
+  <!-- ============ WATCH ============ -->
+  <section id="watchView" hidden>
+    <div class="card">
+      <div class="row">
+        <span><span class="dot off" id="connDot"></span><b id="connLabel">Not connected</b></span>
+      </div>
+      <label>Alert channel (ntfy topic) — must match the track phone</label>
+      <div class="row">
+        <input type="text" id="watchTopic" class="mono" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="bigbtn start" id="connectBtn" style="font-size:16px">🔌 Connect &amp; listen</button>
+        <button class="bigbtn ghost" id="testAlertBtn" style="font-size:15px;padding:12px;flex:0 0 auto">🔔 Test sound</button>
+      </div>
+      <div class="small muted" id="watchStatus">Connect to start receiving live updates.</div>
+      <div class="small" style="margin-top:6px">Last seen: <b id="lastSeen">—</b></div>
+    </div>
+    <div class="card">
+      <div id="watchMap"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 6px">Timeline</h3>
+      <ul id="watchLog"><li class="muted small">Nothing yet — events will appear here.</li></ul>
+      <button class="bigbtn ghost" id="backHome2" style="font-size:15px;padding:10px">← Back</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- arrival overlay -->
+<div id="overlay" hidden>
+  <div class="pop">
+    <div style="font-size:52px">🍕</div>
+    <div class="big">Your son arrived at<br>Big Taste Pizza!</div>
+    <div class="muted" id="overlayTime"></div>
+    <button class="bigbtn start" id="overlayOk" style="margin-top:16px">OK — got it</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* ================= helpers ================= */
+const $ = id => document.getElementById(id);
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function distM(a,b,c,d){
+  const R = 6371000, toRad = x => x * Math.PI / 180;
+  const dLa = toRad(c-a), dLo = toRad(d-b);
+  const h = Math.sin(dLa/2)**2 + Math.cos(toRad(a))*Math.cos(toRad(c))*Math.sin(dLo/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function nowTime(){ return new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
+function fmtAgo(ms){
+  const s = Math.round(ms/1000);
+  if(s < 5) return "just now";
+  if(s < 60) return s + "s ago";
+  const m = Math.floor(s/60);
+  if(m < 60) return m + "m ago";
+  return Math.floor(m/60) + "h ago";
+}
+
+/* ================= sound + vibration ================= */
+let actx = null;
+function ensureAudio(){
+  try{
+    if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if(actx.state === "suspended") actx.resume();
+  }catch(e){}
+}
+function beep(freq, t0, dur){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "sine"; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function playAlertSound(){
+  ensureAudio();
+  if(!actx) return;
+  try{
+    const t = actx.currentTime;
+    [880, 880, 1175, 880, 1175].forEach((f,i) => beep(f, t + i*0.28, 0.22));
+  }catch(e){}
+}
+function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,150,500]); }catch(e){} }
+
+/* ================= config ================= */
+const LS_KEY = "pizzaTracker.v1";
+const PIZZA_DEFAULT = { lat: 43.488303, lng: -79.697561, radius: 100,
+                        name: "Big Taste Pizza — 2165 Grosvenor St, Oakville" };
+function randTopic(){
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  let s = "pizza-";
+  const buf = new Uint32Array(10);
+  if(crypto.getRandomValues) crypto.getRandomValues(buf);
+  else for(let i=0;i<10;i++) buf[i] = Math.floor(Math.random()*0xffffffff);
+  for(let i=0;i<10;i++) s += chars[buf[i] % chars.length];
+  return s;
+}
+function defaultCfg(){
+  return { topic: randTopic(),
+           school: { lat:null, lng:null, radius:150 },
+           pizza:  { lat:PIZZA_DEFAULT.lat, lng:PIZZA_DEFAULT.lng, radius:100 } };
+}
+function loadCfg(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return defaultCfg();
+    const c = Object.assign(defaultCfg(), JSON.parse(raw));
+    c.school = Object.assign({lat:null,lng:null,radius:150}, c.school);
+    c.pizza  = Object.assign({lat:PIZZA_DEFAULT.lat,lng:PIZZA_DEFAULT.lng,radius:100}, c.pizza);
+    return c;
+  }catch(e){ return defaultCfg(); }
+}
+function saveCfg(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }catch(e){} }
+let cfg = loadCfg();
+
+/* ================= routing ================= */
+function parseHash(){
+  const h = location.hash.replace(/^#\/?/, "");
+  const qi = h.indexOf("?");
+  const mode = (qi >= 0 ? h.slice(0, qi) : h).toLowerCase();
+  const params = new URLSearchParams(qi >= 0 ? h.slice(qi+1) : "");
+  return { mode, topic: params.get("topic") };
+}
+function currentMode(){ const {mode} = parseHash(); return (mode === "track" || mode === "watch") ? mode : "home"; }
+function showMode(){
+  const m = currentMode();
+  $("homeView").hidden = m !== "home";
+  $("trackView").hidden = m !== "track";
+  $("watchView").hidden = m !== "watch";
+  $("modeLabel").textContent = m === "track" ? "📍 tracking side" : m === "watch" ? "👀 watching side" : "";
+  if(m === "track") initTrackMap();
+  if(m === "watch") initWatchMap();
+}
+window.addEventListener("hashchange", () => { adoptTopicFromHash(); showMode(); });
+function adoptTopicFromHash(){
+  const {topic} = parseHash();
+  if(topic && topic !== cfg.topic){
+    cfg.topic = topic;
+    saveCfg(); syncTopicInputs();
+    trackLog("🔗 Alert channel set from link: " + topic);
+  }
+}
+$("goTrack").onclick = () => location.hash = "#track";
+$("goWatch").onclick = () => location.hash = "#watch";
+$("backHome1").onclick = () => location.hash = "";
+$("backHome2").onclick = () => location.hash = "";
+
+/* ================= ntfy ================= */
+async function ntfyPost(topic, body, opts){
+  opts = opts || {};
+  const headers = {};
+  if(opts.title) headers["Title"] = opts.title;
+  if(opts.tags) headers["Tags"] = opts.tags;
+  if(opts.priority) headers["Priority"] = String(opts.priority);
+  const r = await fetch("https://ntfy.sh/" + encodeURIComponent(topic),
+                        { method:"POST", headers, body });
+  if(!r.ok) throw new Error("ntfy " + r.status);
+  return r;
+}
+
+/* ================= TRACK side ================= */
+let trackMap = null, schoolMarker = null, schoolCircle = null,
+    pizzaMarker = null, pizzaCircle = null, dotMarker = null, accCircle = null;
+const T = { active:false, phase:"idle", watchId:null, wakeLock:null,
+            lastFix:null, leftCount:0, lastPing:0, lastPingPos:null, phasePushed:"" };
+
+function trackLog(msg){
+  const li = document.createElement("li");
+  li.innerHTML = '<span class="t">' + nowTime() + '</span>' + escapeHtml(msg);
+  $("trackLog").prepend(li);
+}
+function setPhase(p, label){
+  T.phase = p;
+  const el = $("phaseLabel");
+  el.className = "phase " + (p === "idle" ? "idle" : p === "at-school" ? "atschool" : p);
+  el.textContent = label;
+}
+function syncTopicInputs(){
+  $("topicInput").value = cfg.topic;
+  $("watchTopic").value = cfg.topic;
+}
+function refreshSetupLabels(){
+  $("schoolCoords").textContent = (cfg.school.lat != null)
+    ? "School pin: " + cfg.school.lat.toFixed(5) + ", " + cfg.school.lng.toFixed(5)
+    : "School pin: not set yet";
+  $("schoolRadius").value = cfg.school.radius;
+  $("pizzaRadius").value = cfg.pizza.radius;
+}
+
+function initTrackMap(){
+  if(trackMap){ setTimeout(()=>trackMap.invalidateSize(), 50); drawTrackPins(); return; }
+  trackMap = L.map("map");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+              { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(trackMap);
+  const center = cfg.school.lat != null ? [cfg.school.lat, cfg.school.lng]
+                                       : [cfg.pizza.lat, cfg.pizza.lng];
+  trackMap.setView(center, 15);
+  dotMarker = L.circleMarker([0,0], {radius:9, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1});
+  accCircle = L.circle([0,0], {radius:0, color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08});
+  drawTrackPins();
+  setTimeout(()=>trackMap.invalidateSize(), 100);
+}
+function drawTrackPins(){
+  if(!trackMap) return;
+  const schoolIcon = L.divIcon({className:"", html:'<div style="font-size:28px">🏫</div>',
+                                iconSize:[28,28], iconAnchor:[14,26]});
+  const pizzaIcon = L.divIcon({className:"", html:'<div style="font-size:28px">🍕</div>',
+                               iconSize:[28,28], iconAnchor:[14,26]});
+  if(cfg.school.lat != null){
+    if(!schoolMarker){
+      schoolMarker = L.marker([cfg.school.lat, cfg.school.lng],
+                              {icon:schoolIcon, draggable:true}).addTo(trackMap);
+      schoolMarker.on("dragend", () => {
+        const p = schoolMarker.getLatLng();
+        cfg.school.lat = +p.lat.toFixed(6); cfg.school.lng = +p.lng.toFixed(6);
+        saveCfg(); refreshSetupLabels(); drawTrackPins();
+        trackLog("🏫 School pin moved.");
+      });
+    } else schoolMarker.setLatLng([cfg.school.lat, cfg.school.lng]);
+    if(!schoolCircle) schoolCircle = L.circle([0,0], {color:"#1a73e8", weight:2, fillOpacity:.08}).addTo(trackMap);
+    schoolCircle.setLatLng([cfg.school.lat, cfg.school.lng]).setRadius(cfg.school.radius);
+  }
+  if(!pizzaMarker){
+    pizzaMarker = L.marker([cfg.pizza.lat, cfg.pizza.lng],
+                           {icon:pizzaIcon, draggable:true}).addTo(trackMap);
+    pizzaMarker.on("dragend", () => {
+      const p = pizzaMarker.getLatLng();
+      cfg.pizza.lat = +p.lat.toFixed(6); cfg.pizza.lng = +p.lng.toFixed(6);
+      saveCfg(); drawTrackPins();
+      trackLog("🍕 Pizza pin moved.");
+    });
+    pizzaMarker.bindPopup(escapeHtml(PIZZA_DEFAULT.name));
+  } else pizzaMarker.setLatLng([cfg.pizza.lat, cfg.pizza.lng]);
+  if(!pizzaCircle) pizzaCircle = L.circle([0,0], {color:"#d93025", weight:2, fillOpacity:.08}).addTo(trackMap);
+  pizzaCircle.setLatLng([cfg.pizza.lat, cfg.pizza.lng]).setRadius(cfg.pizza.radius);
+}
+
+async function requestWakeLock(){
+  try{
+    if("wakeLock" in navigator) T.wakeLock = await navigator.wakeLock.request("screen");
+  }catch(e){}
+}
+function releaseWakeLock(){
+  try{ if(T.wakeLock) T.wakeLock.release(); }catch(e){}
+  T.wakeLock = null;
+}
+document.addEventListener("visibilitychange", () => {
+  if(T.active && document.visibilityState === "visible") requestWakeLock();
+});
+
+function startTracking(){
+  ensureAudio();
+  if(!("geolocation" in navigator)){ trackLog("❌ Geolocation not available in this browser."); return; }
+  if(cfg.school.lat == null){
+    trackLog("⚠️ Set the school pin first (Setup below), or arrival-only mode will apply.");
+  }
+  T.active = true; T.phase = "idle"; T.leftCount = 0;
+  T.lastPing = 0; T.lastPingPos = null; T.phasePushed = "";
+  setPhase("idle", "Arming… waiting for GPS");
+  $("startBtn").textContent = "⏹ Stop tracking";
+  $("startBtn").className = "bigbtn stop";
+  $("rearmBtn").disabled = true;
+  trackLog("▶ Tracking started. Keep this page open.");
+  requestWakeLock();
+  T.watchId = navigator.geolocation.watchPosition(onTrackFix, onTrackError,
+    { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
+}
+function stopTracking(silent){
+  T.active = false;
+  if(T.watchId != null){ try{ navigator.geolocation.clearWatch(T.watchId); }catch(e){} T.watchId = null; }
+  releaseWakeLock();
+  setPhase("idle", "Not tracking");
+  $("startBtn").textContent = "▶ Start tracking";
+  $("startBtn").className = "bigbtn start";
+  $("rearmBtn").disabled = false;
+  if(!silent) trackLog("⏹ Tracking stopped.");
+}
+$("startBtn").onclick = () => T.active ? stopTracking() : startTracking();
+$("rearmBtn").onclick = () => {
+  T.phase = "idle"; T.leftCount = 0;
+  setPhase("idle", "Armed — waiting for GPS");
+  $("rearmBtn").disabled = true;
+  trackLog("↺ Re-armed for the next trip.");
+};
+function onTrackError(e){
+  trackLog("⚠️ GPS error: " + (e && e.message ? e.message : e));
+}
+function onTrackFix(pos){
+  const lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy || 999;
+  T.lastFix = {lat, lng, acc, t: Date.now()};
+  if(dotMarker){
+    if(!trackMap.hasLayer(dotMarker)){ dotMarker.addTo(trackMap); accCircle.addTo(trackMap); }
+    dotMarker.setLatLng([lat,lng]);
+    accCircle.setLatLng([lat,lng]).setRadius(Math.min(acc, 500));
+  }
+  $("statusLine").textContent =
+    lat.toFixed(5) + ", " + lng.toFixed(5) + "  (±" + Math.round(acc) + "m)  " + nowTime();
+
+  if(!T.active) return;
+  const usable = acc <= 400;
+  if(!usable) return;
+
+  const schoolSet = cfg.school.lat != null;
+  const dS = schoolSet ? distM(lat, lng, cfg.school.lat, cfg.school.lng) : Infinity;
+  const dP = distM(lat, lng, cfg.pizza.lat, cfg.pizza.lng);
+
+  if(T.phase === "idle"){
+    if(schoolSet && dS <= cfg.school.radius){
+      setPhase("at-school", "At school — armed");
+      trackLog("🏫 At school. Will alert when you leave for lunch.");
+    } else {
+      setPhase("enroute", "On the move");
+      trackLog("🚶 Tracking away from school — watching for the pizza shop.");
+    }
+  } else if(T.phase === "at-school"){
+    if(dS > cfg.school.radius * 1.25){ T.leftCount++; } else { T.leftCount = 0; }
+    if(T.leftCount >= 2){
+      setPhase("enroute", "Left school — en route 🍕");
+      trackLog("🏫 Left school — heading out for lunch.");
+      ntfyPost(cfg.topic, "🏫 Left school — heading out for lunch",
+               {title:"Pizza Run Tracker", tags:"school"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
+    }
+  } else if(T.phase === "enroute"){
+    if(dP <= cfg.pizza.radius){
+      setPhase("arrived", "Arrived at Big Taste Pizza 🍕");
+      trackLog("🍕 Arrived at Big Taste Pizza!");
+      playAlertSound(); vibrate();
+      ntfyPost(cfg.topic, "🍕 Arrived at Big Taste Pizza!",
+               {title:"Pizza Run Tracker", tags:"pizza"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
+      $("rearmBtn").disabled = false;
+    }
+  }
+
+  // periodic location ping (silent: min priority)
+  const now = Date.now();
+  const moved = !T.lastPingPos || distM(lat, lng, T.lastPingPos.lat, T.lastPingPos.lng) > 30;
+  if(now - T.lastPing > 25000 && (moved || T.phasePushed !== T.phase)){
+    T.lastPing = now; T.lastPingPos = {lat, lng}; T.phasePushed = T.phase;
+    ntfyPost(cfg.topic,
+      JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
+                      acc:Math.round(acc), phase:T.phase, t:now}),
+      {priority:1}).catch(()=>{});
+  }
+}
+
+/* track setup controls */
+$("setSchoolBtn").onclick = () => {
+  ensureAudio();
+  if(!("geolocation" in navigator)){ trackLog("❌ Geolocation not available."); return; }
+  trackLog("📡 Getting current position for the school pin…");
+  navigator.geolocation.getCurrentPosition(p => {
+    cfg.school.lat = +p.coords.latitude.toFixed(6);
+    cfg.school.lng = +p.coords.longitude.toFixed(6);
+    saveCfg(); refreshSetupLabels(); drawTrackPins();
+    if(trackMap) trackMap.setView([cfg.school.lat, cfg.school.lng], 16);
+    trackLog("🏫 School pin set (±" + Math.round(p.coords.accuracy || 0) + "m). Drag it on the map to fine-tune.");
+  }, e => trackLog("⚠️ Couldn't get position: " + (e && e.message ? e.message : e)),
+  { enableHighAccuracy:true, timeout:20000 });
+};
+$("schoolRadius").onchange = e => { cfg.school.radius = Math.max(30, +e.target.value || 150); saveCfg(); drawTrackPins(); };
+$("pizzaRadius").onchange  = e => { cfg.pizza.radius  = Math.max(30, +e.target.value || 100); saveCfg(); drawTrackPins(); };
+$("topicInput").onchange   = e => { cfg.topic = e.target.value.trim() || randTopic(); saveCfg(); syncTopicInputs(); };
+$("regenTopic").onclick    = () => { cfg.topic = randTopic(); saveCfg(); syncTopicInputs(); $("ntfyStatus").textContent = "New channel created — copy the son's link again."; };
+$("copySonLink").onclick = async () => {
+  const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(cfg.topic);
+  try{ await navigator.clipboard.writeText(url); $("ntfyStatus").textContent = "✓ Son's link copied — text it to him."; }
+  catch(e){ $("ntfyStatus").textContent = "Copy this link: " + url; }
+};
+
+/* ================= WATCH side ================= */
+let watchMap = null, wSchoolCircle = null, wPizzaCircle = null, wSonMarker = null, wSonAcc = null;
+let es = null, seenIds = new Set(), sonState = null, lastSeenT = 0, titleFlashTimer = null;
+
+function initWatchMap(){
+  if(watchMap){ setTimeout(()=>watchMap.invalidateSize(), 50); drawWatchPins(); return; }
+  watchMap = L.map("watchMap");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+              { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(watchMap);
+  watchMap.setView([cfg.pizza.lat, cfg.pizza.lng], 14);
+  drawWatchPins();
+  setTimeout(()=>watchMap.invalidateSize(), 100);
+}
+function drawWatchPins(){
+  if(!watchMap) return;
+  if(cfg.school.lat != null && !wSchoolCircle){
+    wSchoolCircle = L.circle([cfg.school.lat, cfg.school.lng],
+      {radius:cfg.school.radius, color:"#1a73e8", weight:2, fillOpacity:.08}).addTo(watchMap);
+    L.marker([cfg.school.lat, cfg.school.lng],
+      {icon:L.divIcon({className:"", html:'<div style="font-size:26px">🏫</div>', iconSize:[26,26], iconAnchor:[13,24]})})
+      .addTo(watchMap).bindPopup("School");
+  }
+  if(!wPizzaCircle){
+    wPizzaCircle = L.circle([cfg.pizza.lat, cfg.pizza.lng],
+      {radius:cfg.pizza.radius, color:"#d93025", weight:2, fillOpacity:.1}).addTo(watchMap);
+    L.marker([cfg.pizza.lat, cfg.pizza.lng],
+      {icon:L.divIcon({className:"", html:'<div style="font-size:26px">🍕</div>', iconSize:[26,26], iconAnchor:[13,24]})})
+      .addTo(watchMap).bindPopup(escapeHtml(PIZZA_DEFAULT.name));
+    watchMap.fitBounds(wPizzaCircle.getBounds().pad(0.6));
+  }
+}
+function watchLog(msg, important){
+  const placeholder = $("watchLog").querySelector(".muted");
+  if(placeholder) placeholder.remove();
+  const li = document.createElement("li");
+  if(important) li.style.fontWeight = "700";
+  li.innerHTML = '<span class="t">' + nowTime() + '</span>' + escapeHtml(msg);
+  $("watchLog").prepend(li);
+}
+function setConn(on, label){
+  $("connDot").className = "dot " + (on ? "on" : "off");
+  $("connLabel").textContent = label;
+}
+function showArrivalOverlay(){
+  $("overlayTime").textContent = "Detected at " + nowTime();
+  $("overlay").hidden = false;
+  playAlertSound(); vibrate();
+  let on = false;
+  clearInterval(titleFlashTimer);
+  titleFlashTimer = setInterval(() => {
+    document.title = on ? "🍕 ARRIVED — Pizza Run Tracker" : "Pizza Run Tracker";
+    on = !on;
+  }, 900);
+}
+$("overlayOk").onclick = () => {
+  $("overlay").hidden = true;
+  clearInterval(titleFlashTimer);
+  document.title = "Pizza Run Tracker";
+};
+
+function connectWatch(){
+  ensureAudio();
+  const topic = $("watchTopic").value.trim();
+  if(!topic){ $("watchStatus").textContent = "⚠️ Enter the alert channel (topic) first."; return; }
+  cfg.topic = topic; saveCfg();
+  disconnectWatch(true);
+  setConn(false, "Connecting…");
+  $("watchStatus").textContent = "Listening on “" + topic + "”…";
+  try{
+    es = new EventSource("https://ntfy.sh/" + encodeURIComponent(topic) + "/sse");
+  }catch(e){
+    setConn(false, "Connection failed");
+    $("watchStatus").textContent = "❌ Could not connect: " + e.message;
+    return;
+  }
+  es.onopen = () => { setConn(true, "Connected — listening"); $("connectBtn").textContent = "⏹ Disconnect"; $("watchStatus").textContent = "✓ Live. Leave this page open for the alert."; };
+  es.onerror = () => { setConn(false, "Reconnecting…"); };
+  es.onmessage = e => {
+    let outer;
+    try{ outer = JSON.parse(e.data); }catch(err){ return; }
+    if(!outer || outer.id == null || seenIds.has(outer.id)) return;
+    seenIds.add(outer.id);
+    const body = outer.message || "";
+    let obj = null;
+    try{ obj = JSON.parse(body); }catch(err){}
+    if(obj && obj.type === "loc" && Number.isFinite(obj.lat)){
+      sonState = obj; lastSeenT = Date.now();
+      $("lastSeen").textContent = "just now (" + obj.phase + ")";
+      if(watchMap){
+        const ll = [obj.lat, obj.lng];
+        if(!wSonMarker){
+          wSonMarker = L.circleMarker(ll, {radius:10, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(watchMap);
+          wSonAcc = L.circle(ll, {radius:Math.min(obj.acc||100,500), color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08}).addTo(watchMap);
+          watchMap.setView(ll, 15);
+        } else {
+          wSonMarker.setLatLng(ll);
+          wSonAcc.setLatLng(ll).setRadius(Math.min(obj.acc||100,500));
+        }
+      }
+    } else if(body && body.trim()){
+      const text = body.trim();
+      const isArrival = /arriv/i.test(text) && /pizza/i.test(text);
+      watchLog(text, isArrival);
+      if(isArrival) showArrivalOverlay();
+      else if(/left school/i.test(text)){ playAlertSound(); vibrate(); }
+    }
+  };
+}
+function disconnectWatch(silent){
+  if(es){ try{ es.close(); }catch(e){} es = null; }
+  $("connectBtn").textContent = "🔌 Connect & listen";
+  if(!silent){ setConn(false, "Not connected"); $("watchStatus").textContent = "Disconnected."; }
+}
+$("connectBtn").onclick = () => es ? disconnectWatch() : connectWatch();
+$("testAlertBtn").onclick = () => { ensureAudio(); playAlertSound(); vibrate(); watchLog("🔔 Test alert — if you heard it and felt it, you're all set."); };
+setInterval(() => {
+  if(lastSeenT) $("lastSeen").textContent = fmtAgo(Date.now() - lastSeenT);
+}, 5000);
+
+/* ================= init ================= */
+syncTopicInputs();
+refreshSetupLabels();
+adoptTopicFromHash();
+showMode();
+</script>
+</body>
+</html>
