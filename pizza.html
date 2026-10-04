@@ -66,8 +66,8 @@
       <h3 style="margin:0 0 6px">How it works</h3>
       <ol class="howto">
         <li>On <b>your</b> phone open the <b>watch</b> side and copy the <b>son's link</b> (it carries a private alert channel).</li>
-        <li>Send that link to your son. He opens it at school, taps <b>Set school to my current spot</b>, then <b>Start tracking</b> before leaving for lunch.</li>
-        <li>When he leaves school you get a <b>“left school”</b> note; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
+        <li>Send that link to your son. He opens it — the school (St. Marguerite d'Youville) is already pinned — taps <b>Check GPS</b> to confirm a sharp fix, then <b>Start tracking</b> before leaving for lunch.</li>
+        <li>When he leaves the school property you get a <b>“left school”</b> note; if he strays more than ~150 m off the usual walking route you get an <b>“off course”</b> warning; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
         <li>Keep the track page open on his phone until he arrives (it keeps the screen awake).</li>
       </ol>
       <p class="muted small">Alerts travel through ntfy.sh on a random private topic — only someone with the link can see them. No accounts, no app install needed (the ntfy app is optional for extra push backup).</p>
@@ -82,6 +82,10 @@
       <div class="row" style="margin-top:10px">
         <button class="bigbtn start" id="startBtn">▶ Start tracking</button>
       </div>
+      <div class="row">
+        <button class="bigbtn ghost" id="gpsCheckBtn" style="font-size:15px;padding:10px">📡 Check GPS</button>
+      </div>
+      <div class="small muted" id="gpsCheckLine" style="margin-bottom:4px"></div>
       <div class="row">
         <button class="bigbtn ghost" id="rearmBtn" style="font-size:15px;padding:10px" disabled>↺ Re-arm for next trip</button>
       </div>
@@ -115,9 +119,10 @@
     <div class="card">
       <h3 style="margin:0 0 6px">Good to know</h3>
       <ul class="howto">
+        <li>Use <b>Check GPS</b> before starting — alerts only fire on fixes sharper than ±150 m, so a poor fix just waits instead of misfiring.</li>
         <li>Keep this page <b>open in the foreground</b> until arrival — if the browser is closed or the tab killed, tracking stops.</li>
         <li>The page tries to keep the screen awake. On iPhone, keep the phone charged and glance at it now and then.</li>
-        <li>Arrival needs a decent GPS fix; tall buildings can delay it by a minute or two.</li>
+        <li>The dashed blue line is the usual walking route (~900 m). Straying more than ~150 m off it triggers the off-course warning.</li>
       </ul>
       <button class="bigbtn ghost" id="backHome1" style="font-size:15px;padding:10px">← Back</button>
     </div>
@@ -178,6 +183,22 @@ function distM(a,b,c,d){
   const h = Math.sin(dLa/2)**2 + Math.cos(toRad(a))*Math.cos(toRad(c))*Math.sin(dLo/2)**2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+function distToSeg(p, a, b){
+  /* distance (m) from point p to segment a-b; points as [lat, lng]; equirectangular approx */
+  const kx = 111320 * Math.cos((p[0] + a[0]) / 2 * Math.PI / 180), ky = 110540;
+  const px = (p[1]-a[1])*kx, py = (p[0]-a[0])*ky;
+  const bx = (b[1]-a[1])*kx, by = (b[0]-a[0])*ky;
+  const L2 = bx*bx + by*by;
+  let t = L2 ? (px*bx + py*by) / L2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - t*bx, py - t*by);
+}
+function distToRoute(lat, lng){
+  let best = Infinity;
+  for(let i=0;i<ROUTE_PATH.length-1;i++)
+    best = Math.min(best, distToSeg([lat,lng], ROUTE_PATH[i], ROUTE_PATH[i+1]));
+  return best;
+}
 function nowTime(){ return new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}); }
 function fmtAgo(ms){
   const s = Math.round(ms/1000);
@@ -216,9 +237,14 @@ function playAlertSound(){
 function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,150,500]); }catch(e){} }
 
 /* ================= config ================= */
-const LS_KEY = "pizzaTracker.v1";
+const LS_KEY = "pizzaTracker.v2";
 const PIZZA_DEFAULT = { lat: 43.488303, lng: -79.697561, radius: 100,
                         name: "Big Taste Pizza — 2165 Grosvenor St, Oakville" };
+const SCHOOL_DEFAULT = { lat: 43.4942050, lng: -79.6937659, radius: 150,
+                         name: "St. Marguerite d'Youville CES — 1359 Bayshire Dr" };
+/* Walking route school -> pizza, baked at build time via OSRM (26 points, ~906 m). */
+const ROUTE_PATH = [[43.49431, -79.6927], [43.49406, -79.69266], [43.49394, -79.69263], [43.4932, -79.69245], [43.49301, -79.69244], [43.49254, -79.69246], [43.49207, -79.69248], [43.49182, -79.69263], [43.49144, -79.693], [43.49136, -79.69309], [43.49128, -79.69318], [43.49071, -79.69382], [43.49033, -79.6942], [43.49008, -79.69451], [43.48993, -79.69479], [43.48981, -79.6951], [43.48921, -79.6969], [43.48917, -79.69704], [43.48906, -79.69734], [43.48897, -79.69752], [43.48892, -79.69762], [43.48878, -79.69785], [43.48867, -79.698], [43.48863, -79.69796], [43.48852, -79.69785], [43.4883, -79.69757]];
+const OFF_ROUTE_M = 150;   /* off-course alert threshold, metres */
 function randTopic(){
   const chars = "abcdefghjkmnpqrstuvwxyz23456789";
   let s = "pizza-";
@@ -230,7 +256,7 @@ function randTopic(){
 }
 function defaultCfg(){
   return { topic: randTopic(),
-           school: { lat:null, lng:null, radius:150 },
+           school: { lat:SCHOOL_DEFAULT.lat, lng:SCHOOL_DEFAULT.lng, radius:150 },
            pizza:  { lat:PIZZA_DEFAULT.lat, lng:PIZZA_DEFAULT.lng, radius:100 } };
 }
 function loadCfg(){
@@ -293,9 +319,11 @@ async function ntfyPost(topic, body, opts){
 
 /* ================= TRACK side ================= */
 let trackMap = null, schoolMarker = null, schoolCircle = null,
-    pizzaMarker = null, pizzaCircle = null, dotMarker = null, accCircle = null;
+    pizzaMarker = null, pizzaCircle = null, dotMarker = null, accCircle = null,
+    trackRouteLine = null;
 const T = { active:false, phase:"idle", watchId:null, wakeLock:null,
-            lastFix:null, leftCount:0, lastPing:0, lastPingPos:null, phasePushed:"" };
+            lastFix:null, leftCount:0, lastPing:0, lastPingPos:null, phasePushed:"",
+            offCount:0, offCourse:false, routeInfo:"" };
 
 function trackLog(msg){
   const li = document.createElement("li");
@@ -331,6 +359,10 @@ function initTrackMap(){
   dotMarker = L.circleMarker([0,0], {radius:9, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1});
   accCircle = L.circle([0,0], {radius:0, color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08});
   drawTrackPins();
+  if(!trackRouteLine && ROUTE_PATH.length > 1){
+    trackRouteLine = L.polyline(ROUTE_PATH, {color:"#1a73e8", weight:4, opacity:.55, dashArray:"8 8"}).addTo(trackMap);
+    trackRouteLine.bindPopup("Usual walking route: school → Big Taste Pizza (~900 m)");
+  }
   setTimeout(()=>trackMap.invalidateSize(), 100);
 }
 function drawTrackPins(){
@@ -389,6 +421,8 @@ function startTracking(){
   }
   T.active = true; T.phase = "idle"; T.leftCount = 0;
   T.lastPing = 0; T.lastPingPos = null; T.phasePushed = "";
+  T.offCount = 0; T.offCourse = false; T.routeInfo = "";
+  stopGpsCheck();
   setPhase("idle", "Arming… waiting for GPS");
   $("startBtn").textContent = "⏹ Stop tracking";
   $("startBtn").className = "bigbtn stop";
@@ -409,8 +443,40 @@ function stopTracking(silent){
   if(!silent) trackLog("⏹ Tracking stopped.");
 }
 $("startBtn").onclick = () => T.active ? stopTracking() : startTracking();
+
+/* Pre-trip GPS accuracy check: shows live fix + accuracy so you can confirm
+   the phone's GPS is sharp before starting. */
+let gpsCheckId = null;
+function stopGpsCheck(){
+  if(gpsCheckId != null){ try{ navigator.geolocation.clearWatch(gpsCheckId); }catch(e){} gpsCheckId = null; }
+  $("gpsCheckBtn").textContent = "📡 Check GPS";
+}
+$("gpsCheckBtn").onclick = () => {
+  ensureAudio();
+  if(gpsCheckId != null){ stopGpsCheck(); $("gpsCheckLine").textContent = ""; return; }
+  if(T.active){ $("gpsCheckLine").textContent = "Already tracking — accuracy is shown above."; return; }
+  if(!("geolocation" in navigator)){ $("gpsCheckLine").textContent = "❌ Geolocation not available."; return; }
+  $("gpsCheckBtn").textContent = "⏹ Stop check";
+  $("gpsCheckLine").textContent = "📡 Waiting for GPS fix… (best outdoors, away from buildings)";
+  gpsCheckId = navigator.geolocation.watchPosition(p => {
+    const a = Math.round(p.coords.accuracy || 9999);
+    const verdict = a <= 50 ? "✓ excellent — good to go"
+                  : a <= 150 ? "✓ OK for tracking"
+                  : "⚠️ poor — step outside / wait for a sharper fix";
+    $("gpsCheckLine").textContent =
+      "📍 " + p.coords.latitude.toFixed(5) + ", " + p.coords.longitude.toFixed(5) +
+      "   ±" + a + "m   " + verdict;
+    if(dotMarker && trackMap){
+      if(!trackMap.hasLayer(dotMarker)){ dotMarker.addTo(trackMap); accCircle.addTo(trackMap); }
+      dotMarker.setLatLng([p.coords.latitude, p.coords.longitude]);
+      accCircle.setLatLng([p.coords.latitude, p.coords.longitude]).setRadius(Math.min(p.coords.accuracy || 0, 500));
+    }
+  }, e => { $("gpsCheckLine").textContent = "⚠️ GPS error: " + ((e && e.message) || e); },
+  { enableHighAccuracy:true, maximumAge:0, timeout:20000 });
+};
 $("rearmBtn").onclick = () => {
   T.phase = "idle"; T.leftCount = 0;
+  T.offCount = 0; T.offCourse = false; T.routeInfo = "";
   setPhase("idle", "Armed — waiting for GPS");
   $("rearmBtn").disabled = true;
   trackLog("↺ Re-armed for the next trip.");
@@ -432,11 +498,13 @@ function onTrackFix(pos){
   if(!T.active) return;
   const usable = acc <= 400;
   if(!usable) return;
+  const precise = acc <= 150;   /* state changes need a sharp fix */
 
   const schoolSet = cfg.school.lat != null;
   const dS = schoolSet ? distM(lat, lng, cfg.school.lat, cfg.school.lng) : Infinity;
   const dP = distM(lat, lng, cfg.pizza.lat, cfg.pizza.lng);
 
+  if(precise){
   if(T.phase === "idle"){
     if(schoolSet && dS <= cfg.school.radius){
       setPhase("at-school", "At school — armed");
@@ -449,11 +517,25 @@ function onTrackFix(pos){
     if(dS > cfg.school.radius * 1.25){ T.leftCount++; } else { T.leftCount = 0; }
     if(T.leftCount >= 2){
       setPhase("enroute", "Left school — en route 🍕");
-      trackLog("🏫 Left school — heading out for lunch.");
+      trackLog("🏫 Left school property — heading out for lunch.");
       ntfyPost(cfg.topic, "🏫 Left school — heading out for lunch",
                {title:"Pizza Run Tracker", tags:"school"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
     }
   } else if(T.phase === "enroute"){
+    const dRoute = distToRoute(lat, lng);
+    T.routeInfo = dRoute <= OFF_ROUTE_M ? "on route" : Math.round(dRoute) + "m off route";
+    if(dRoute > OFF_ROUTE_M){
+      T.offCount++;
+      if(!T.offCourse && T.offCount >= 3){
+        T.offCourse = true;
+        trackLog("⚠️ Off the usual route (" + Math.round(dRoute) + "m off course).");
+        ntfyPost(cfg.topic, "⚠️ Off the usual route to Big Taste Pizza (" + Math.round(dRoute) + "m off course)",
+                 {title:"Pizza Run Tracker", tags:"warning"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
+      }
+    } else {
+      T.offCount = 0;
+      if(T.offCourse){ T.offCourse = false; trackLog("↩️ Back on the usual route."); }
+    }
     if(dP <= cfg.pizza.radius){
       setPhase("arrived", "Arrived at Big Taste Pizza 🍕");
       trackLog("🍕 Arrived at Big Taste Pizza!");
@@ -463,6 +545,11 @@ function onTrackFix(pos){
       $("rearmBtn").disabled = false;
     }
   }
+  } else {
+    $("statusLine").textContent += " — waiting for a sharper GPS fix";
+  }
+  if(T.phase === "enroute" && T.routeInfo)
+    $("statusLine").textContent += " • " + T.routeInfo;
 
   // periodic location ping (silent: min priority)
   const now = Date.now();
@@ -501,7 +588,8 @@ $("copySonLink").onclick = async () => {
 };
 
 /* ================= WATCH side ================= */
-let watchMap = null, wSchoolCircle = null, wPizzaCircle = null, wSonMarker = null, wSonAcc = null;
+let watchMap = null, wSchoolCircle = null, wPizzaCircle = null, wSonMarker = null, wSonAcc = null,
+    wRouteLine = null;
 let es = null, seenIds = new Set(), sonState = null, lastSeenT = 0, titleFlashTimer = null;
 
 function initWatchMap(){
@@ -511,6 +599,9 @@ function initWatchMap(){
               { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(watchMap);
   watchMap.setView([cfg.pizza.lat, cfg.pizza.lng], 14);
   drawWatchPins();
+  if(!wRouteLine && ROUTE_PATH.length > 1){
+    wRouteLine = L.polyline(ROUTE_PATH, {color:"#1a73e8", weight:4, opacity:.55, dashArray:"8 8"}).addTo(watchMap);
+  }
   setTimeout(()=>watchMap.invalidateSize(), 100);
 }
 function drawWatchPins(){
