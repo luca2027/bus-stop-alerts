@@ -68,8 +68,8 @@
     <div class="card">
       <h3 style="margin:0 0 6px">How it works</h3>
       <ol class="howto">
-        <li>On <b>your</b> phone open the <b>watch</b> side and copy the <b>son's link</b> (it carries a private alert channel).</li>
-        <li>Send that link to your son. He opens it — the school (St. Marguerite d'Youville) is already pinned — taps <b>Check GPS</b> to confirm a sharp fix, then <b>Start tracking</b> before leaving for lunch.</li>
+        <li>Pair the two sides — pick one direction: on the <b>track</b> phone tap <b>Copy watch link</b> and open it on the watcher's device, <b>or</b> on the <b>watch</b> side tap <b>Copy son's link</b> and send it to your son. Either way both sides land on the same private channel (shown as 📻 Channel on the track side).</li>
+        <li>Your son opens the track side — the school (St. Marguerite d'Youville) is already pinned — taps <b>Check GPS</b> to confirm a sharp fix, then <b>Start tracking</b> before leaving for lunch.</li>
         <li>When he leaves the school property you get a <b>“left school”</b> note; if he strays more than ~150 m off the usual walking route you get an <b>“off course”</b> warning; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
         <li>Keep the track page open on his phone until he arrives (it keeps the screen awake).</li>
       </ol>
@@ -82,6 +82,7 @@
     <div class="card">
       <div class="phase idle" id="phaseLabel">Not tracking</div>
       <div class="small muted" id="statusLine">Press Start tracking before leaving school.</div>
+      <div class="small" style="margin-top:6px">📻 Channel: <b class="mono" id="trackChannel"></b><br><span class="muted">The watch side must use this exact channel.</span></div>
       <div class="small mono" id="ntfyTrackStatus" style="margin-top:4px"></div>
       <div class="row" style="margin-top:10px">
         <button class="bigbtn start" id="startBtn">▶ Start tracking</button>
@@ -111,6 +112,9 @@
       </div>
       <div class="row" style="margin-top:8px">
         <button class="bigbtn blue" id="copySonLink" style="font-size:15px;padding:10px">🔗 Copy my son's link</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="bigbtn blue" id="copyWatchLink" style="font-size:15px;padding:10px">👀 Copy watch link (for the watcher's device)</button>
       </div>
       <div class="small muted" id="ntfyStatus"></div>
     </details>
@@ -343,6 +347,7 @@ function setPhase(p, label){
 function syncTopicInputs(){
   $("topicInput").value = cfg.topic;
   $("watchTopic").value = cfg.topic;
+  $("trackChannel").textContent = cfg.topic;
 }
 function refreshSetupLabels(){
   $("schoolCoords").textContent = "🏫 " + SCHOOL_DEFAULT.name + " — " +
@@ -588,6 +593,11 @@ $("regenTopic").onclick    = () => { cfg.topic = randTopic(); saveCfg(); syncTop
 $("copySonLink").onclick = async () => {
   const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(cfg.topic);
   try{ await navigator.clipboard.writeText(url); $("ntfyStatus").textContent = "✓ Son's link copied — text it to him."; }
+  catch(e){ $("ntfyStatus").textContent = "Copy this link: " + url; }
+};
+$("copyWatchLink").onclick = async () => {
+  const url = location.href.split("#")[0] + "#watch?topic=" + encodeURIComponent(cfg.topic);
+  try{ await navigator.clipboard.writeText(url); $("ntfyStatus").textContent = "✓ Watch link copied — open it on the watcher's device."; }
   catch(e){ $("ntfyStatus").textContent = "Copy this link: " + url; }
 };
 
