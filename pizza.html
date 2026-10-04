@@ -137,6 +137,10 @@
         <button class="bigbtn start" id="connectBtn" style="font-size:16px">🔌 Connect &amp; listen</button>
         <button class="bigbtn ghost" id="testAlertBtn" style="font-size:15px;padding:12px;flex:0 0 auto">🔔 Test sound</button>
       </div>
+      <div class="row" style="margin-top:8px">
+        <button class="bigbtn blue" id="copySonLinkW" style="font-size:15px;padding:10px">🔗 Copy my son's link</button>
+      </div>
+      <div class="small muted" id="watchPairStatus"></div>
       <div class="small muted" id="watchStatus">Connect to start receiving live updates.</div>
       <div class="small" style="margin-top:6px">Last seen: <b id="lastSeen">—</b></div>
     </div>
@@ -611,6 +615,15 @@ function disconnectWatch(silent){
 }
 $("connectBtn").onclick = () => es ? disconnectWatch() : connectWatch();
 $("testAlertBtn").onclick = () => { ensureAudio(); playAlertSound(); vibrate(); watchLog("🔔 Test alert — if you heard it and felt it, you're all set."); };
+$("watchTopic").onchange = e => { if(e.target.value.trim()){ cfg.topic = e.target.value.trim(); saveCfg(); } };
+$("copySonLinkW").onclick = async () => {
+  ensureAudio();
+  const topic = $("watchTopic").value.trim() || cfg.topic;
+  cfg.topic = topic; saveCfg(); syncTopicInputs();
+  const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(topic);
+  try{ await navigator.clipboard.writeText(url); $("watchPairStatus").textContent = "✓ Son's link copied — text it to him."; }
+  catch(e){ $("watchPairStatus").textContent = "Copy this link: " + url; }
+};
 setInterval(() => {
   if(lastSeenT) $("lastSeen").textContent = fmtAgo(Date.now() - lastSeenT);
 }, 5000);
