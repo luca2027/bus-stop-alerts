@@ -45,6 +45,9 @@
   #overlay .pop .big{ font-size:30px; font-weight:800; margin:8px 0; }
   .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
   .dot.on{ background:var(--green); } .dot.off{ background:#c9c9c9; }
+  .pinlabel{ background:#fff; border:1px solid #1a73e8; border-radius:6px;
+             font-size:12px; font-weight:700; padding:2px 6px; box-shadow:0 1px 4px rgba(0,0,0,.2); }
+  .pinlabel:before{ display:none; }
   .howto li{ margin:6px 0; font-size:14px; }
 </style>
 </head>
@@ -375,6 +378,8 @@ function drawTrackPins(){
     if(!schoolMarker){
       schoolMarker = L.marker([cfg.school.lat, cfg.school.lng],
                               {icon:schoolIcon, draggable:true}).addTo(trackMap);
+      schoolMarker.bindTooltip("St. Marguerite d'Youville CES",
+        {permanent:true, direction:"top", offset:[0,-28], className:"pinlabel"});
       schoolMarker.on("dragend", () => {
         const p = schoolMarker.getLatLng();
         cfg.school.lat = +p.lat.toFixed(6); cfg.school.lng = +p.lng.toFixed(6);
@@ -601,12 +606,14 @@ function initWatchMap(){
 }
 function drawWatchPins(){
   if(!watchMap) return;
-  if(cfg.school.lat != null && !wSchoolCircle){
-    wSchoolCircle = L.circle([cfg.school.lat, cfg.school.lng],
-      {radius:cfg.school.radius, color:"#1a73e8", weight:2, fillOpacity:.08}).addTo(watchMap);
-    L.marker([cfg.school.lat, cfg.school.lng],
+  const sch = (cfg.school.lat != null) ? cfg.school : SCHOOL_DEFAULT; /* always show the school mark */
+  if(!wSchoolCircle){
+    wSchoolCircle = L.circle([sch.lat, sch.lng],
+      {radius:sch.radius, color:"#1a73e8", weight:2, fillOpacity:.08}).addTo(watchMap);
+    L.marker([sch.lat, sch.lng],
       {icon:L.divIcon({className:"", html:'<div style="font-size:26px">🏫</div>', iconSize:[26,26], iconAnchor:[13,24]})})
-      .addTo(watchMap).bindPopup("School");
+      .addTo(watchMap)
+      .bindTooltip("St. Marguerite d'Youville CES", {permanent:true, direction:"top", offset:[0,-26], className:"pinlabel"});
   }
   if(!wPizzaCircle){
     wPizzaCircle = L.circle([cfg.pizza.lat, cfg.pizza.lng],
@@ -614,7 +621,9 @@ function drawWatchPins(){
     L.marker([cfg.pizza.lat, cfg.pizza.lng],
       {icon:L.divIcon({className:"", html:'<div style="font-size:26px">🍕</div>', iconSize:[26,26], iconAnchor:[13,24]})})
       .addTo(watchMap).bindPopup(escapeHtml(PIZZA_DEFAULT.name));
-    watchMap.fitBounds(wPizzaCircle.getBounds().pad(0.6));
+    const sch0 = (cfg.school.lat != null) ? cfg.school : SCHOOL_DEFAULT;
+    watchMap.fitBounds(L.latLngBounds(
+      [cfg.pizza.lat, cfg.pizza.lng], [sch0.lat, sch0.lng]).pad(0.35));
   }
 }
 function watchLog(msg, important){
