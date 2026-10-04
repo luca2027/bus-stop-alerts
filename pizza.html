@@ -118,7 +118,7 @@
         <li>Use <b>Check GPS</b> before starting — alerts only fire on fixes sharper than ±150 m, so a poor fix just waits instead of misfiring.</li>
         <li>Keep this page <b>open in the foreground</b> until arrival — if the browser is closed or the tab killed, tracking stops.</li>
         <li>The page tries to keep the screen awake. On iPhone, keep the phone charged and glance at it now and then.</li>
-        <li>The dashed blue line is the usual walking route (~900 m). Straying more than ~150 m off it triggers the off-course warning.</li>
+        <li>The dashed blue line is the usual walking route (~870 m). Straying more than ~150 m off it triggers the off-course warning.</li>
       </ul>
       <button class="bigbtn ghost" id="backHome1" style="font-size:15px;padding:10px">← Back</button>
     </div>
@@ -234,12 +234,12 @@ function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,15
 
 /* ================= config ================= */
 const LS_KEY = "pizzaTracker.v2";
-const PIZZA_DEFAULT = { lat: 43.488303, lng: -79.697561, radius: 100,
-                        name: "Big Taste Pizza — 2165 Grosvenor St, Oakville" };
+const PIZZA_DEFAULT = { lat: 43.48849, lng: -79.69802, radius: 100,
+                        name: "Big Taste Pizza — 2165 Grosvenor St, Oakville (beside Iroquois Ridge HS)" };
 const SCHOOL_DEFAULT = { lat: 43.4942050, lng: -79.6937659, radius: 150,
                          name: "St. Marguerite d'Youville CES — 1359 Bayshire Dr" };
 /* Walking route school -> pizza, baked at build time via OSRM (26 points, ~906 m). */
-const ROUTE_PATH = [[43.49431, -79.6927], [43.49406, -79.69266], [43.49394, -79.69263], [43.4932, -79.69245], [43.49301, -79.69244], [43.49254, -79.69246], [43.49207, -79.69248], [43.49182, -79.69263], [43.49144, -79.693], [43.49136, -79.69309], [43.49128, -79.69318], [43.49071, -79.69382], [43.49033, -79.6942], [43.49008, -79.69451], [43.48993, -79.69479], [43.48981, -79.6951], [43.48921, -79.6969], [43.48917, -79.69704], [43.48906, -79.69734], [43.48897, -79.69752], [43.48892, -79.69762], [43.48878, -79.69785], [43.48867, -79.698], [43.48863, -79.69796], [43.48852, -79.69785], [43.4883, -79.69757]];
+const ROUTE_PATH = [[43.49431, -79.6927], [43.49406, -79.69266], [43.49394, -79.69263], [43.4932, -79.69245], [43.49301, -79.69244], [43.49254, -79.69246], [43.49207, -79.69248], [43.49182, -79.69263], [43.49144, -79.693], [43.49136, -79.69309], [43.49128, -79.69318], [43.49071, -79.69382], [43.49033, -79.6942], [43.49008, -79.69451], [43.48993, -79.69479], [43.48981, -79.6951], [43.48921, -79.6969], [43.48917, -79.69704], [43.48906, -79.69734], [43.48897, -79.69752], [43.48892, -79.69762], [43.48878, -79.69785], [43.48867, -79.698], [43.48857, -79.69814]];
 const OFF_ROUTE_M = 150;   /* off-course alert threshold, metres */
 function randTopic(){
   const chars = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -260,8 +260,10 @@ function loadCfg(){
     const raw = localStorage.getItem(LS_KEY);
     if(!raw) return defaultCfg();
     const c = Object.assign(defaultCfg(), JSON.parse(raw));
-    c.school = Object.assign({lat:null,lng:null,radius:150}, c.school);
-    c.pizza  = Object.assign({lat:PIZZA_DEFAULT.lat,lng:PIZZA_DEFAULT.lng,radius:100}, c.pizza);
+    /* Pins and zones are fixed in code and can't be moved from any phone:
+       always use the baked locations, keep only the topic from storage. */
+    c.school = { lat:SCHOOL_DEFAULT.lat, lng:SCHOOL_DEFAULT.lng, radius:150 };
+    c.pizza  = { lat:PIZZA_DEFAULT.lat, lng:PIZZA_DEFAULT.lng, radius:PIZZA_DEFAULT.radius };
     return c;
   }catch(e){ return defaultCfg(); }
 }
@@ -355,7 +357,7 @@ function initTrackMap(){
   drawTrackPins();
   if(!trackRouteLine && ROUTE_PATH.length > 1){
     trackRouteLine = L.polyline(ROUTE_PATH, {color:"#1a73e8", weight:4, opacity:.55, dashArray:"8 8"}).addTo(trackMap);
-    trackRouteLine.bindPopup("Usual walking route: school → Big Taste Pizza (~900 m)");
+    trackRouteLine.bindPopup("Usual walking route: school → Big Taste Pizza (~870 m)");
   }
   setTimeout(()=>trackMap.invalidateSize(), 100);
 }
