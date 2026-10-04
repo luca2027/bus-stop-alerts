@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bus Stop Alerts — AM route</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{
+  --blue:#1a73e8; --green:#1a9e4b; --red:#d93025; --ink:#0f2a4a;
+  --bg:#f6f8fb; --card:#ffffff; --text:#1f2933; --muted:#6b7280; --line:#d0d7e0;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent}
+header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;background:var(--ink);color:#fff;position:sticky;top:0;z-index:1000}
+.brand{font-weight:800;font-size:18px;display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.route-chip{background:#fff;color:var(--ink);border-radius:999px;padding:3px 12px;font-size:13px;font-weight:800}
+.switcher{background:var(--blue);color:#fff;text-decoration:none;font-weight:800;padding:12px 16px;border-radius:12px;font-size:16px;white-space:nowrap}
+.gps-notice{background:#fff8e1;color:#5d4037;padding:10px 14px;font-size:14px;border-bottom:1px solid #f0e0b0}
+.viewnav{display:flex;gap:8px;padding:10px 14px 0}
+.viewnav button{flex:1;padding:13px;font-size:16px;border:2px solid var(--line);background:#fff;border-radius:12px;font-weight:700;cursor:pointer;color:var(--text)}
+.viewnav button.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+section{padding:6px 14px 48px}
+.hidden{display:none!important}
+button.big{width:100%;padding:16px;font-size:18px;border:none;border-radius:14px;font-weight:800;margin:8px 0;cursor:pointer}
+.primary{background:var(--green);color:#fff}
+.danger{background:var(--red);color:#fff}
+.secondary{background:#e8eef5;color:var(--ink);border:none;border-radius:10px;padding:11px 14px;font-weight:700;font-size:15px;cursor:pointer}
+.status{background:var(--ink);color:#fff;border-radius:12px;padding:12px;margin:10px 0;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
+.progress-wrap{background:#dfe6ee;border-radius:999px;height:28px;position:relative;margin:10px 0;overflow:hidden}
+#progressBar{background:var(--green);height:100%;width:0;transition:width .4s}
+#progressText{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}
+.nextup{background:#fff;border:2px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;font-size:17px}
+#map{height:52vh;min-height:320px;border-radius:14px;border:2px solid var(--line);margin:10px 0;z-index:0;background:#dde3ea}
+.map-error{padding:24px;text-align:center;color:var(--muted)}
+.panel{background:#fff;border:2px solid var(--line);border-radius:14px;padding:12px;margin:14px 0}
+.panel h3{margin:0 0 8px;font-size:17px}
+.row{display:flex;gap:8px;align-items:center;margin:8px 0}
+.wrap{flex-wrap:wrap}
+.topic{flex:1;min-width:170px;padding:10px;border:2px solid var(--line);border-radius:10px;font-size:15px}
+.muted{color:var(--muted)} .small{font-size:13px}
+.switch{display:flex;gap:10px;align-items:center;font-size:16px;font-weight:600;margin:6px 0}
+.switch input{width:22px;height:22px}
+/* map pins */
+.pin-wrap{background:none;border:none}
+.pin{width:34px;height:34px;border-radius:50%;background:#fff;border:3px solid var(--blue);color:var(--ink);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.pin.next{border-color:#ff9800;box-shadow:0 0 0 6px rgba(255,152,0,.35)}
+.pin.reached{background:var(--green);border-color:#0d6b2f;color:#fff}
+.pin.skipped{background:#9e9e9e;border-color:#616161;color:#fff}
+.follow-chip{background:#fff;border:2px solid var(--blue);color:var(--ink);border-radius:999px;padding:8px 12px;font-weight:800;font-size:14px;box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer;margin:10px}
+.follow-chip.off{border-color:#9e9e9e;color:#616161}
+/* setup cards */
+.card{background:#fff;border:2px solid var(--line);border-radius:14px;margin:10px 0;overflow:hidden}
+.card-head{padding:13px;display:flex;gap:8px;align-items:center;cursor:pointer;user-select:none}
+.card-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:14px}
+.chev{color:var(--muted)}
+.card.open .chev{transform:rotate(180deg);display:inline-block}
+.badge{font-size:12px;border-radius:999px;padding:3px 9px;font-weight:700;white-space:nowrap}
+.badge.ok{background:#e6f4ea;color:#0d6b2f}
+.badge.warn{background:#fce8e6;color:#a50e0e}
+.card-body{display:none;padding:2px 13px 13px}
+.card.open .card-body{display:block}
+.card label{display:block;margin:10px 0;font-size:14px;font-weight:700}
+.card input[type=text],.card input[type=time],.card input[type=number]{width:100%;padding:11px;margin-top:5px;border:2px solid var(--line);border-radius:10px;font-size:16px;font-weight:400}
+.row2{display:flex;gap:8px} .row2 label{flex:1;min-width:0}
+.card input[type=range]{width:100%;margin-top:6px;accent-color:var(--blue)}
+.mapslink{font-size:15px;font-weight:700;color:var(--blue);align-self:center}
+.nextstop{width:100%;margin-top:10px;padding:13px;border:none;border-radius:10px;font-size:16px;cursor:pointer}
+/* arrival popup */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:2000;padding:20px}
+.popup{background:#fff;border-radius:18px;padding:26px 22px;text-align:center;max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.popup .bus{font-size:44px}
+.popup-title{font-size:24px;font-weight:800;margin:8px 0 18px;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">🚌 Bus Stop Alerts <span class="route-chip">AM route</span></div>
+  <a class="switcher" href="pm.html">⇄ PM route</a>
+</header>
+
+<div class="gps-notice">⚠️ Keep this page open during the ride — closing the tab or backgrounding the browser stops GPS tracking. Phone GPS is approximate (± several meters).</div>
+
+<nav class="viewnav">
+  <button id="navTrip" class="active">🚍 Trip</button>
+  <button id="navSetup">⚙️ Setup</button>
+</nav>
+
+<!-- ================= TRIP VIEW ================= -->
+<section id="view-trip">
+  <button id="startBtn" class="big primary">▶ Start ride</button>
+  <button id="endBtn" class="big danger hidden">■ End ride</button>
+
+  <div id="statusLine" class="status">GPS: not started. Press “Start ride” when you begin the route.</div>
+
+  <div class="progress-wrap"><div id="progressBar"></div><span id="progressText">0 / 0 stops</span></div>
+
+  <div id="nextUp" class="nextup">Next up: —</div>
+  <div class="row">
+    <button id="navNextBtn" class="secondary">🧭 Navigate to next stop</button>
+  </div>
+
+  <div id="map"></div>
+
+  <div class="panel">
+    <h3>Alerts to another phone</h3>
+    <label class="switch"><input type="checkbox" id="followToggle" checked> <span>Send push alerts at each stop</span></label>
+    <div class="row wrap">
+      <input id="topicInput" class="topic" spellcheck="false" autocomplete="off" placeholder="ntfy topic">
+      <button id="copyTopicBtn" class="secondary">Copy topic</button>
+      <button id="sendTestBtn" class="secondary">Send test</button>
+    </div>
+    <div id="ntfyStatus" class="muted small"></div>
+    <p class="muted small">On the other phone, install the ntfy app (or open ntfy.sh) and subscribe to this topic — it will get a push notification at every stop arrival.</p>
+  </div>
+</section>
+
+<!-- ================= SETUP VIEW ================= -->
+<section id="view-setup" class="hidden">
+  <div id="backToRideWrap" class="hidden">
+    <button id="backToRide" class="big secondary">← Back to ride</button>
+    <p class="muted small">GPS tracking and follower alerts keep running while you edit.</p>
+  </div>
+  <p class="muted">Stand at each stop and tap <b>“📍 Use current location”</b>, or type the coordinates by hand. Changes save automatically on this phone.</p>
+  <div class="row wrap">
+    <button id="exportBtn" class="secondary">⬇ Export route JSON</button>
+    <button id="importBtn" class="secondary">⬆ Import route JSON</button>
+    <input type="file" id="importFile" accept="application/json,.json" class="hidden">
+  </div>
+  <div id="stopList"></div>
+</section>
+
+<!-- ================= ARRIVAL POPUP ================= -->
+<div id="arrivePopup" class="overlay hidden">
+  <div class="popup">
+    <div class="bus">🚌</div>
+    <div class="popup-title" id="popupTitle">Stop reached</div>
+    <button id="continueBtn" class="big primary">Continue route</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   Baked-in route data.
+   STOPS: { number, letter (optional), time, name, lat, lng, radius, acc }
+     radius: alert radius in meters (30–250, default 80)
+     acc: required GPS accuracy in meters (50–500, default 1.5 × radius).
+          An alert fires only when the position fix error is within acc.
+   ROUTE_PATH: 13 [lat, lng] points forming the route polyline.
+   (Straight stop-to-stop segments here — no routing API calls at runtime.
+   Swap in precomputed OSRM driving-route output when real stop coordinates
+   are baked in.)
+   ===================================================================== */
+const ROUTE_ID = "am";
+const ROUTE_TITLE = "AM route";
+const OTHER_FILE = "pm.html";
+const OTHER_LABEL = "PM route";
+const DEFAULT_STOPS = [{"number": 1, "letter": "", "time": "07:00", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 2, "letter": "", "time": "07:05", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 3, "letter": "", "time": "07:10", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 4, "letter": "", "time": "07:15", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 5, "letter": "", "time": "07:20", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 6, "letter": "", "time": "07:25", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 7, "letter": "", "time": "07:30", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 8, "letter": "", "time": "07:35", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 9, "letter": "", "time": "07:40", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 10, "letter": "", "time": "07:45", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 11, "letter": "", "time": "07:50", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 12, "letter": "", "time": "07:55", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}, {"number": 13, "letter": "", "time": "08:00", "name": "", "lat": 0, "lng": 0, "radius": 80, "acc": 120, "set": false}];
+const ROUTE_PATH = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]; // 13 points
+const DEFAULT_TOPIC = "bus-alerts-zpxz5jrwzkl4pwoo";
+const LS_KEY = "busStopAlerts." + ROUTE_ID + ".v1";
+
+/* ---------------- state ---------------- */
+function cloneStops(){ return JSON.parse(JSON.stringify(DEFAULT_STOPS)); }
+function loadState(){
+  const fresh = () => ({ stops: cloneStops(), topic: DEFAULT_TOPIC, followOn: true });
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return fresh();
+    const d = JSON.parse(raw), s = fresh(), base = cloneStops();
+    if(d && Array.isArray(d.stops) && d.stops.length){
+      s.stops = d.stops.map((x,i) => Object.assign({}, base[i % base.length], x));
+    }
+    if(d && typeof d.topic === "string" && d.topic.trim()) s.topic = d.topic.trim();
+    if(d && typeof d.followOn === "boolean") s.followOn = d.followOn;
+    return s;
+  }catch(e){ return fresh(); }
+}
+let state = loadState();
+function saveState(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+  catch(e){ /* storage unavailable (e.g. some file:// contexts) — keep in memory */ }
+}
+let saveT = null;
+function debouncedSave(){ clearTimeout(saveT); saveT = setTimeout(saveState, 400); }
+
+/* live route polyline, seeded from baked ROUTE_PATH, rebuilt when stops change */
+let routePath = ROUTE_PATH.slice();
+function rebuildRoutePath(){ routePath = state.stops.filter(hasCoords).map(s => [s.lat, s.lng]); }
+
+/* ---------------- helpers ---------------- */
+const $ = id => document.getElementById(id);
+const stopId = s => (s.letter ? String(s.letter) : String(s.number));
+const stopName = s => (s.name && String(s.name).trim()) ? String(s.name).trim() : "unnamed stop";
+const stopTitle = s => "Stop " + stopId(s) + ": " + stopName(s);          // pins, popups, push
+const stopNextUp = s => "Stop " + stopId(s) + " — " + stopName(s);        // next-up line
+const hasCoords = s => s.set === true && Number.isFinite(s.lat) && Number.isFinite(s.lng);
+function escapeHtml(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function distM(a,b,c,d){
+  const R = 6371000, toRad = x => x * Math.PI / 180;
+  const dLa = toRad(c-a), dLo = toRad(d-b);
+  const h = Math.sin(dLa/2)**2 + Math.cos(toRad(a))*Math.cos(toRad(c))*Math.sin(dLo/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function setStatus(t){ $("statusLine").textContent = t; }
+
+/* ---------------- sound + vibration ---------------- */
+let actx = null;
+function ensureAudio(){
+  try{
+    if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if(actx.state === "suspended") actx.resume();
+  }catch(e){}
+}
+function beep(freq, t0, dur){
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "sine"; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function playAlertSound(){
+  ensureAudio();
+  if(!actx) return;
+  try{
+    const t = actx.currentTime;
+    [880, 880, 1175].forEach((f,i) => beep(f, t + i*0.30, 0.24));
+  }catch(e){}
+}
+function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([250,120,250]); }catch(e){} }
+
+/* ---------------- map ---------------- */
+let map = null, pinLayer = null, pathLine = null, dotMarker = null, accCircle = null;
+let followChip = null, suppressUserZoom = false;
+const ride = { active:false, nextIdx:0, reached:new Set(), skipped:new Set(),
+               snapped:false, completed:false, follow:true, popupTimer:null, watchId:null, wakeLock:null };
+let lastFix = null;
+
+function programmaticZoom(fn){ suppressUserZoom = true; try{ fn(); }finally{ setTimeout(()=>{ suppressUserZoom = false; }, 60); } }
+
+function initMap(){
+  if(typeof L === "undefined"){
+    $("map").innerHTML = '<div class="map-error">⚠️ Map failed to load (Leaflet CDN unreachable).<br>GPS alerts still work.</div>';
+    return;
+  }
+  map = L.map("map");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  const pts = state.stops.filter(hasCoords).map(s => [s.lat, s.lng]);
+  if(pts.length) map.fitBounds(pts, {padding:[30,30]});
+  else map.setView([20, 0], 2);
+  pathLine = L.polyline(routePath, {color:"#1a9e4b", weight:5, opacity:0.85}).addTo(map);
+  pinLayer = L.layerGroup().addTo(map);
+  accCircle = L.circle([0,0], {radius:0, color:"#1a73e8", weight:1, opacity:0.4, fillOpacity:0.08}).addTo(map);
+  dotMarker = L.circleMarker([0,0], {radius:9, color:"#ffffff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(map);
+  dotMarker.setStyle({opacity:0, fillOpacity:0}); // hidden until first fix
+  const FollowCtl = L.Control.extend({
+    options:{ position:"topright" },
+    onAdd(){
+      const b = L.DomUtil.create("button", "follow-chip");
+      b.type = "button";
+      L.DomEvent.disableClickPropagation(b);
+      b.addEventListener("click", () => setFollow(!ride.follow));
+      followChip = b; updateFollowChip();
+      return b;
+    }
+  });
+  map.addControl(new FollowCtl());
+  map.on("dragstart", () => setFollow(false));                 // don't fight the user
+  map.on("zoomstart", () => { if(!suppressUserZoom) setFollow(false); });
+  window.addEventListener("resize", () => { if(map) map.invalidateSize(); });
+  window.addEventListener("orientationchange", () => { if(map) setTimeout(()=>map.invalidateSize(), 300); });
+}
+function setFollow(on){ ride.follow = on; updateFollowChip(); }
+function updateFollowChip(){
+  if(!followChip) return;
+  followChip.textContent = ride.follow ? "📍 Follow: on" : "📍 Follow: off";
+  followChip.classList.toggle("off", !ride.follow);
+}
+function pinFor(idx){
+  const s = state.stops[idx];
+  let cls = "pin";
+  if(ride.reached.has(idx)) cls += " reached";
+  else if(ride.skipped.has(idx)) cls += " skipped";
+  else if(ride.active && idx === ride.nextIdx) cls += " next";
+  const icon = L.divIcon({className:"pin-wrap",
+    html:'<div class="'+cls+'">'+escapeHtml(stopId(s))+"</div>",
+    iconSize:[34,34], iconAnchor:[17,17]});
+  const m = L.marker([s.lat, s.lng], {icon:icon});
+  const gmaps = "https://www.google.com/maps/search/?api=1&query=" + s.lat + "," + s.lng;
+  m.bindPopup("<b>"+escapeHtml(stopTitle(s))+"</b><br>🕒 "+escapeHtml(s.time || "—")+
+    '<br><a href="'+gmaps+'" target="_blank" rel="noopener">Open in Google Maps</a>');
+  return m;
+}
+function refreshMap(){
+  if(!map) return;
+  pinLayer.clearLayers();
+  state.stops.forEach((s,i) => { if(hasCoords(s)) pinLayer.addLayer(pinFor(i)); });
+  pathLine.setLatLngs(routePath);
+}
+function updateDot(){
+  if(!map || !lastFix) return;
+  const ll = [lastFix.lat, lastFix.lng];
+  dotMarker.setLatLng(ll);
+  dotMarker.setStyle({opacity:1, fillOpacity:1});
+  accCircle.setLatLng(ll);
+  accCircle.setRadius(Math.min(lastFix.acc, 2000));
+}
+function zoomToStreet(){
+  if(!map || !lastFix) return;
+  programmaticZoom(() => map.setView([lastFix.lat, lastFix.lng], 16));
+}
+function gentleRecenter(){
+  if(!map || !lastFix || !ride.follow) return;
+  const ll = L.latLng(lastFix.lat, lastFix.lng);
+  if(!map.getBounds().pad(-0.25).contains(ll)) map.panTo(ll, {animate:true});
+}
+
+/* ---------------- GPS / ride ---------------- */
+function startRide(){
+  if(ride.active) return;
+  if(!("geolocation" in navigator)){ setStatus("❌ Geolocation is not available in this browser."); return; }
+  const unset = state.stops.map((s,i) => ({s:s, i:i})).filter(x => !hasCoords(x.s));
+  if(unset.length){
+    setStatus("⚠️ Set locations for all stops in Setup first: " + unset.map(x => "Stop " + stopId(x.s)).join(", "));
+    showView("setup");
+    return;
+  }
+  ensureAudio(); // unlock audio on the user gesture
+  hidePopup();
+  ride.active = true; ride.nextIdx = 0;
+  ride.reached = new Set(); ride.skipped = new Set();
+  ride.snapped = false; ride.completed = false; ride.follow = true;
+  $("startBtn").classList.add("hidden");
+  $("endBtn").classList.remove("hidden");
+  updateBackToRide(); updateProgress(); updateNextUp(); refreshMap(); updateFollowChip();
+  setStatus("📡 Waiting for GPS fix… keep this page open.");
+  requestWakeLock();
+  startWatch();
+}
+function endRide(reason, keepPopup){
+  if(!ride.active) return;
+  ride.active = false;
+  stopWatch(); releaseWakeLock();
+  if(!keepPopup) hidePopup();
+  $("startBtn").classList.remove("hidden");
+  $("endBtn").classList.add("hidden");
+  setStatus(reason || "Ride ended.");
+  updateBackToRide(); refreshMap();
+}
+function startWatch(){
+  if(ride.watchId != null) return;
+  try{
+    ride.watchId = navigator.geolocation.watchPosition(onFix, onFixError,
+      {enableHighAccuracy:true, maximumAge:3000, timeout:30000});
+  }catch(e){ setStatus("❌ Could not start GPS: " + e.message); }
+}
+function stopWatch(){
+  if(ride.watchId != null){ try{ navigator.geolocation.clearWatch(ride.watchId); }catch(e){} ride.watchId = null; }
+}
+function onFix(pos){
+  const lat = pos.coords.latitude, lng = pos.coords.longitude;
+  const acc = (pos.coords.accuracy && pos.coords.accuracy > 0) ? pos.coords.accuracy : 9999;
+  lastFix = {lat:lat, lng:lng, acc:acc, time:Date.now()};
+  updateDot();
+  if(!ride.active){
+    setStatus("📍 GPS fix ±" + Math.round(acc) + " m (ride not started).");
+    return;
+  }
+  if(!ride.snapped && acc <= 200){ snapToNearest(); ride.snapped = true; zoomToStreet(); }
+  if(ride.snapped){ gentleRecenter(); checkArrival(); }
+  updateStatusTracking();
+}
+function onFixError(e){
+  let m = "GPS error: ";
+  if(e.code === 1) m += "permission denied — allow location access for this page.";
+  else if(e.code === 2) m += "position unavailable.";
+  else if(e.code === 3) m += "timeout — trying again…";
+  else m += e.message || "unknown.";
+  setStatus("⚠️ " + m);
+}
+function snapToNearest(){
+  let best = -1, bestD = Infinity;
+  state.stops.forEach((s,i) => {
+    const d = distM(lastFix.lat, lastFix.lng, s.lat, s.lng);
+    if(d < bestD){ bestD = d; best = i; }
+  });
+  if(best >= 0 && bestD <= 500){
+    for(let i = 0; i < best; i++) ride.skipped.add(i);
+    ride.nextIdx = best;
+    setStatus("📍 Snapped to nearest stop within 500 m: " + stopTitle(state.stops[best]) +
+      " (" + Math.round(bestD) + " m away). Earlier stops marked skipped.");
+  }else{
+    ride.nextIdx = 0;
+    setStatus("📍 No stop within 500 m — starting from " + stopTitle(state.stops[0]) + ".");
+  }
+  updateProgress(); updateNextUp(); refreshMap();
+}
+function checkArrival(){
+  if(ride.nextIdx >= state.stops.length){
+    if(!ride.completed) endRide("🏁 Route complete — all stops done.");
+    return;
+  }
+  const s = state.stops[ride.nextIdx];
+  if(lastFix.acc > s.acc) return; // fix not good enough for this stop — wait
+  const d = distM(lastFix.lat, lastFix.lng, s.lat, s.lng);
+  if(d <= s.radius) onArrival(ride.nextIdx, s);
+}
+function onArrival(idx, s){
+  ride.reached.add(idx);
+  playAlertSound();
+  vibrate();
+  showPopup(s);
+  sendNtfy(s, false);
+  ride.nextIdx = idx + 1;
+  updateProgress(); updateNextUp(); refreshMap();
+  if(ride.nextIdx >= state.stops.length){
+    ride.completed = true;
+    // let the last popup show its full 8 seconds, then end the ride (popup stays visible)
+    setTimeout(() => { if(ride.active) endRide("🏁 Route complete — all stops done.", true); }, 9000);
+  }
+}
+function updateStatusTracking(){
+  if(!ride.active || !lastFix) return;
+  if(ride.nextIdx >= state.stops.length){ setStatus("🏁 Route complete."); return; }
+  const s = state.stops[ride.nextIdx];
+  const d = Math.round(distM(lastFix.lat, lastFix.lng, s.lat, s.lng));
+  let msg = "📍 ±" + Math.round(lastFix.acc) + " m · " + d + " m to " + stopTitle(s);
+  if(lastFix.acc > s.acc) msg += " · waiting for better accuracy (need ≤" + s.acc + " m)";
+  setStatus(msg);
+}
+
+/* ---------------- arrival popup ---------------- */
+function showPopup(s){
+  $("popupTitle").textContent = stopTitle(s) + " reached";
+  $("arrivePopup").classList.remove("hidden");
+  clearTimeout(ride.popupTimer);
+  ride.popupTimer = setTimeout(hidePopup, 8000);
+}
+function hidePopup(){
+  $("arrivePopup").classList.add("hidden");
+  clearTimeout(ride.popupTimer);
+}
+
+/* ---------------- follower push (ntfy) ---------------- */
+async function sendNtfy(s, test){
+  const st = $("ntfyStatus");
+  if(!test && !state.followOn) return;
+  const topic = state.topic.trim();
+  if(!topic){ st.textContent = "⚠️ Set an ntfy topic first."; return; }
+  const body = test ? "🔔 Test alert from Bus Stop Alerts (" + ROUTE_TITLE + ")"
+                    : "🚌 " + stopTitle(s) + " reached";
+  try{
+    const r = await fetch("https://ntfy.sh/" + encodeURIComponent(topic), {
+      method:"POST",
+      headers:{ "Title": test ? "Bus Stop Alerts (test)" : "Bus Stop Alerts",
+                "Tags": test ? "white_check_mark" : "bus" },
+      body: body
+    });
+    st.textContent = r.ok ? ("✓ Sent " + new Date().toLocaleTimeString())
+                          : ("❌ ntfy error " + r.status);
+  }catch(e){ st.textContent = "❌ ntfy failed (network/CORS)."; }
+}
+
+/* ---------------- wake lock ---------------- */
+async function requestWakeLock(){
+  try{ if("wakeLock" in navigator) ride.wakeLock = await navigator.wakeLock.request("screen"); }
+  catch(e){}
+}
+function releaseWakeLock(){
+  try{ if(ride.wakeLock) ride.wakeLock.release(); }catch(e){}
+  ride.wakeLock = null;
+}
+document.addEventListener("visibilitychange", () => {
+  if(ride.active && document.visibilityState === "visible") requestWakeLock();
+});
+
+/* ---------------- progress / next-up ---------------- */
+function updateProgress(){
+  const done = ride.reached.size + ride.skipped.size, total = state.stops.length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  $("progressBar").style.width = pct + "%";
+  $("progressText").textContent = done + " / " + total + " stops · " + pct + "%";
+}
+function updateNextUp(){
+  const el = $("nextUp");
+  if(ride.nextIdx < state.stops.length){
+    const s = state.stops[ride.nextIdx];
+    el.innerHTML = "Next up: <b>" + escapeHtml(stopNextUp(s)) + "</b> " +
+      '<span class="muted">🕒 ' + escapeHtml(s.time || "—") +
+      " · radius " + s.radius + " m · need ±" + s.acc + " m</span>";
+  }else if(ride.active){
+    el.innerHTML = "<b>🏁 All stops complete</b>";
+  }else{
+    el.innerHTML = 'Next up: — <span class="muted">(press “Start ride”)</span>';
+  }
+}
+
+/* ---------------- views ---------------- */
+function showView(v){
+  $("view-trip").classList.toggle("hidden", v !== "trip");
+  $("view-setup").classList.toggle("hidden", v !== "setup");
+  $("navTrip").classList.toggle("active", v === "trip");
+  $("navSetup").classList.toggle("active", v === "setup");
+  if(v === "setup") renderSetup();
+  if(v === "trip" && map) setTimeout(() => map.invalidateSize(), 60);
+  updateBackToRide();
+}
+function updateBackToRide(){
+  const inSetup = !$("view-setup").classList.contains("hidden");
+  $("backToRideWrap").classList.toggle("hidden", !(ride.active && inSetup));
+  $("navTrip").textContent = ride.active ? "← Back to ride" : "🚍 Trip";
+}
+
+/* ---------------- setup editor ---------------- */
+let editingIdx = 0;
+function badgeHtml(s){
+  return hasCoords(s) ? '<span class="badge ok">📍 set</span>'
+                      : '<span class="badge warn">📍 not set</span>';
+}
+function renderSetup(){
+  const list = $("stopList");
+  list.innerHTML = "";
+  state.stops.forEach((s, i) => {
+    const card = document.createElement("div");
+    card.className = "card" + (i === editingIdx ? " open" : "");
+    card.dataset.i = i;
+    const gmaps = "https://www.google.com/maps/search/?api=1&query=" + s.lat + "," + s.lng;
+    card.innerHTML =
+      '<div class="card-head"><b>Stop ' + escapeHtml(stopId(s)) + '</b> ' + badgeHtml(s) +
+        '<span class="card-name">' + escapeHtml(stopName(s)) + '</span><span class="chev">▾</span></div>' +
+      '<div class="card-body">' +
+        '<label>Stop name<input type="text" data-f="name" value="' + escapeHtml(s.name || "") + '" placeholder="e.g. Main St &amp; 5th"></label>' +
+        '<label>Scheduled time<input type="time" data-f="time" value="' + escapeHtml(s.time || "") + '"></label>' +
+        '<div class="row2"><label>Latitude<input type="number" step="0.000001" data-f="lat" value="' + s.lat + '"></label>' +
+        '<label>Longitude<input type="number" step="0.000001" data-f="lng" value="' + s.lng + '"></label></div>' +
+        '<div class="row wrap"><button type="button" class="secondary useloc">📍 Use current location</button>' +
+        '<a class="mapslink" target="_blank" rel="noopener" href="' + gmaps + '">Google Maps ↗</a></div>' +
+        '<div class="locmsg muted small"></div>' +
+        '<label>Alert radius: <b class="rv">' + s.radius + ' m</b>' +
+          '<input type="range" min="30" max="250" step="5" data-f="radius" value="' + s.radius + '"></label>' +
+        '<label>Required GPS accuracy: <b class="av">≤ ' + s.acc + ' m</b>' +
+          '<input type="range" min="50" max="500" step="10" data-f="acc" value="' + s.acc + '"></label>' +
+        (i < state.stops.length - 1
+          ? '<button type="button" class="primary nextstop">Next stop →</button>'
+          : '<button type="button" class="primary nextstop">Done ✓</button>') +
+      '</div>';
+    list.appendChild(card);
+  });
+}
+function scrollToCard(i){
+  const list = $("stopList");
+  if(list.children[i]) list.children[i].scrollIntoView({behavior:"smooth", block:"start"});
+}
+function updateBadge(card, s){
+  const b = card.querySelector(".badge");
+  if(b) b.outerHTML = badgeHtml(s);
+}
+function captureLocation(i, card){
+  const msg = card.querySelector(".locmsg");
+  if(!("geolocation" in navigator)){ msg.textContent = "❌ Geolocation unavailable."; return; }
+  msg.textContent = "📡 Getting GPS fix… stand still for best accuracy.";
+  navigator.geolocation.getCurrentPosition(p => {
+    const s = state.stops[i];
+    s.lat = +p.coords.latitude.toFixed(6);
+    s.lng = +p.coords.longitude.toFixed(6);
+    s.set = true;
+    saveState(); rebuildRoutePath(); refreshMap(); renderSetup();
+    scrollToCard(i);
+  }, e => {
+    msg.textContent = "❌ " + (e.code === 1 ? "Location permission denied." : e.message);
+  }, {enableHighAccuracy:true, timeout:25000, maximumAge:0});
+}
+
+/* ---------------- import / export ---------------- */
+function exportJson(){
+  const data = { app:"Bus Stop Alerts", route:ROUTE_ID, title:ROUTE_TITLE,
+    topic:state.topic, exportedAt:new Date().toISOString(),
+    stops:state.stops, routePath:routePath };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "bus-alerts-" + ROUTE_ID + ".json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function importJson(file){
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const d = JSON.parse(r.result);
+      const arr = Array.isArray(d) ? d : d.stops;
+      if(!Array.isArray(arr) || !arr.length) throw new Error("no stops found");
+      const defaults = cloneStops();
+      state.stops = arr.map((x, idx) => {
+        const o = Object.assign({}, defaults[idx % defaults.length], x);
+        o.lat = +o.lat || 0; o.lng = +o.lng || 0;
+        o.radius = Math.min(250, Math.max(30, +o.radius || 80));
+        o.acc = Math.min(500, Math.max(50, +o.acc || Math.round(o.radius * 1.5)));
+        o.set = !!o.set && !(o.lat === 0 && o.lng === 0);
+        return o;
+      });
+      if(d && typeof d.topic === "string" && d.topic.trim()){
+        state.topic = d.topic.trim(); $("topicInput").value = state.topic;
+      }
+      saveState(); rebuildRoutePath(); refreshMap();
+      editingIdx = 0; renderSetup(); updateProgress(); updateNextUp();
+      alert("✓ Imported " + state.stops.length + " stops.");
+    }catch(err){ alert("❌ Import failed: " + err.message); }
+  };
+  r.readAsText(file);
+}
+
+/* ---------------- init ---------------- */
+function init(){
+  rebuildRoutePath();
+  $("topicInput").value = state.topic;
+  $("followToggle").checked = state.followOn;
+  $("followToggle").addEventListener("change", e => { state.followOn = e.target.checked; saveState(); });
+  $("topicInput").addEventListener("change", e => {
+    state.topic = e.target.value.trim() || DEFAULT_TOPIC;
+    e.target.value = state.topic; saveState();
+  });
+  $("copyTopicBtn").addEventListener("click", async () => {
+    try{ await navigator.clipboard.writeText(state.topic.trim()); $("ntfyStatus").textContent = "✓ Topic copied — subscribe to it in ntfy on the other phone."; }
+    catch(e){ $("topicInput").select(); try{ document.execCommand("copy"); }catch(_){} }
+  });
+  $("sendTestBtn").addEventListener("click", () => sendNtfy(null, true));
+  $("navTrip").addEventListener("click", () => showView("trip"));
+  $("navSetup").addEventListener("click", () => showView("setup"));
+  $("backToRide").addEventListener("click", () => showView("trip"));
+  $("startBtn").addEventListener("click", startRide);
+  $("endBtn").addEventListener("click", () => endRide("Ride ended."));
+  $("continueBtn").addEventListener("click", hidePopup);
+  $("navNextBtn").addEventListener("click", () => {
+    if(ride.nextIdx >= state.stops.length){ alert("Route complete — no next stop."); return; }
+    const s = state.stops[ride.nextIdx];
+    if(!hasCoords(s)){ alert("Next stop has no location set."); return; }
+    window.open("https://www.google.com/maps/dir/?api=1&destination=" + s.lat + "," + s.lng + "&travelmode=driving", "_blank");
+  });
+  $("exportBtn").addEventListener("click", exportJson);
+  $("importBtn").addEventListener("click", () => {
+    if(ride.active){ alert("End the ride before importing a route file."); return; }
+    $("importFile").click();
+  });
+  $("importFile").addEventListener("change", e => {
+    if(e.target.files[0]) importJson(e.target.files[0]);
+    e.target.value = "";
+  });
+  const list = $("stopList");
+  list.addEventListener("click", e => {
+    const card = e.target.closest(".card");
+    if(!card) return;
+    const i = +card.dataset.i;
+    if(e.target.closest(".useloc")){ captureLocation(i, card); return; }
+    if(e.target.closest(".nextstop")){
+      saveState();
+      editingIdx = Math.min(i + 1, state.stops.length - 1);
+      renderSetup(); scrollToCard(editingIdx);
+      return;
+    }
+    if(e.target.closest(".card-head")){
+      editingIdx = (editingIdx === i) ? -1 : i;
+      renderSetup();
+      if(editingIdx >= 0) scrollToCard(i);
+    }
+  });
+  list.addEventListener("input", e => {
+    const card = e.target.closest(".card");
+    if(!card || !e.target.dataset.f) return;
+    const i = +card.dataset.i, f = e.target.dataset.f, s = state.stops[i];
+    if(f === "radius" || f === "acc"){
+      s[f] = +e.target.value;
+      const el = card.querySelector(f === "radius" ? ".rv" : ".av");
+      if(el) el.textContent = f === "radius" ? s.radius + " m" : "≤ " + s.acc + " m";
+    }else if(f === "lat" || f === "lng"){
+      const v = parseFloat(e.target.value);
+      if(Number.isFinite(v)){
+        s[f] = v;
+        s.set = (s.lat !== 0 || s.lng !== 0);
+        updateBadge(card, s); rebuildRoutePath(); refreshMap();
+      }
+    }else if(f === "name"){
+      s.name = e.target.value;
+      const el = card.querySelector(".card-name");
+      if(el) el.textContent = stopName(s);
+    }else if(f === "time"){
+      s.time = e.target.value;
+    }
+    debouncedSave();
+  });
+  initMap();
+  refreshMap();
+  updateProgress();
+  updateNextUp();
+  renderSetup();
+  showView("trip");
+  if(!("geolocation" in navigator)) setStatus("❌ Geolocation is not available in this browser.");
+}
+init();
+</script>
+</body>
+</html>
