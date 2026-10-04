@@ -73,7 +73,7 @@
         <li>When he leaves the school property you get a <b>“left school”</b> note; if he strays more than ~150 m off the usual walking route you get an <b>“off course”</b> warning; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
         <li>Keep the track page open on his phone until he arrives (it keeps the screen awake).</li>
       </ol>
-      <p class="muted small">Alerts travel through ntfy.sh on a random private topic — only someone with the link can see them. No accounts, no app install needed (the ntfy app is optional for extra push backup).</p>
+      <p class="muted small">Alerts travel through ntfy.sh on a random private channel — only someone with the link can see them. No accounts, no app install needed. While walking, his position sends about once a minute (the free alert service caps daily messages, so the app rations them — a whole trip uses ~25).</p>
     </div>
   </section>
 
@@ -243,7 +243,7 @@ function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,15
 
 /* ================= config ================= */
 const LS_KEY = "pizzaTracker.v2";
-const BUILD = "2026-10-04f"; /* visible in the footer — confirms which version a phone runs */
+const BUILD = "2026-10-04h"; /* visible in the footer — confirms which version a phone runs */
 const PIZZA_DEFAULT = { lat: 43.48849, lng: -79.69802, radius: 100,
                         name: "Big Taste Pizza — 2165 Grosvenor St, Oakville (beside Iroquois Ridge HS)" };
 const SCHOOL_DEFAULT = { lat: 43.4942050, lng: -79.6937659, radius: 150,
@@ -319,10 +319,36 @@ async function ntfyPost(topic, body, opts){
   if(opts.title) headers["Title"] = opts.title;
   if(opts.tags) headers["Tags"] = opts.tags;
   if(opts.priority) headers["Priority"] = String(opts.priority);
-  const r = await fetch("https://ntfy.sh/" + encodeURIComponent(topic),
-                        { method:"POST", headers, body });
-  if(!r.ok) throw new Error("ntfy " + r.status);
-  return r;
+  const url = "https://ntfy.sh/" + encodeURIComponent(topic);
+  const send = async (h) => {
+    const r = await fetch(url, { method:"POST", headers:h, body });
+    if(!r.ok){
+      /* Surface ntfy's own reason (e.g. which rate limit was hit). */
+      let detail = "";
+      try{ detail = (await r.text()).slice(0, 180); }catch(e){}
+      const err = new Error("ntfy " + r.status + (detail ? ": " + detail : ""));
+      err.status = r.status;
+      throw err;
+    }
+    return r;
+  };
+  try{
+    return await send(headers);
+  }catch(e){
+    if(Object.keys(headers).length && !e.status){
+      /* Some strict networks block the preflight that custom headers trigger;
+         retry as a plain POST with no custom headers. (Never retry a 429 —
+         that only digs the hole deeper.) */
+      return await send({});
+    }
+    throw e;
+  }
+}
+function ntfyFailHint(e){
+  const msg = (e && e.message) || String(e);
+  return /failed to fetch|networkerror|load failed/i.test(msg)
+    ? " — the phone can't reach the alert server (try turning WiFi off and use mobile data)"
+    : "";
 }
 
 /* ================= TRACK side ================= */
@@ -332,6 +358,8 @@ let trackMap = null, schoolMarker = null, schoolCircle = null,
 const T = { active:false, phase:"idle", watchId:null, wakeLock:null,
             lastFix:null, leftCount:0, lastPing:0, lastPingPos:null, phasePushed:"",
             offCount:0, offCourse:false, routeInfo:"" };
+let rateLimitedUntil = 0;   /* set for 60 s after any 429: sends pause instead of hammering */
+let testCooldownUntil = 0;  /* test button: one tap per 15 s so it can't trip the burst limit */
 
 function trackLog(msg){
   const li = document.createElement("li");
@@ -550,17 +578,32 @@ function onTrackFix(pos){
   if(T.phase === "enroute" && T.routeInfo)
     $("statusLine").textContent += " • " + T.routeInfo;
 
-  // periodic location ping (silent: min priority) — every 25 s while tracking,
-  // even when standing still, so the watch side always has a live dot
+  /* The free alert service allows ~250 messages/day per network, so position
+     pings are rationed: only while enroute, at most every 60 s, or sooner if
+     he actually moved (>25 m and at least 15 s since the last ping). A whole
+     lunch trip costs ~25 messages. Phase changes always send immediately. */
   const now = Date.now();
-  if(now - T.lastPing > 25000 || T.phasePushed !== T.phase){
+  const movedM = T.lastPingPos ? distM(lat, lng, T.lastPingPos.lat, T.lastPingPos.lng) : Infinity;
+  const due = T.phase === "enroute" && Date.now() >= rateLimitedUntil &&
+    (now - T.lastPing > 60000 || (movedM > 25 && now - T.lastPing > 15000) ||
+     T.phasePushed !== T.phase);
+  if(due){
     T.lastPing = now; T.lastPingPos = {lat, lng}; T.phasePushed = T.phase;
     ntfyPost(cfg.topic,
       JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
                       acc:Math.round(acc), phase:T.phase, t:now}),
       {priority:1})
       .then(()=>{ $("ntfyTrackStatus").textContent = "📡 position sent " + nowTime() + " ✓"; })
-      .catch(e=>{ $("ntfyTrackStatus").textContent = "📡 send FAILED: " + (e.message || e); });
+      .catch(e=>{
+        if(e && e.status === 429){
+          /* Back off a full minute instead of hammering — retrying a rate
+             limit is what keeps it tripped. */
+          rateLimitedUntil = Date.now() + 60000;
+          $("ntfyTrackStatus").textContent = "📡 rate limited — pausing sends for 60s";
+        } else {
+          $("ntfyTrackStatus").textContent = "📡 send FAILED: " + (e.message || e) + ntfyFailHint(e);
+        }
+      });
   }
 }
 
@@ -568,6 +611,11 @@ function onTrackFix(pos){
    and reports exactly what happened. */
 $("testPingBtn").onclick = () => {
   ensureAudio();
+  if(Date.now() < testCooldownUntil){
+    $("ntfyTrackStatus").textContent = "⏳ one test at a time — wait a few seconds (rapid taps trip the send limit)";
+    return;
+  }
+  testCooldownUntil = Date.now() + 15000;
   if(!("geolocation" in navigator)){ $("ntfyTrackStatus").textContent = "📡 Geolocation not available."; return; }
   $("ntfyTrackStatus").textContent = "📡 getting GPS fix…";
   navigator.geolocation.getCurrentPosition(async p => {
@@ -582,7 +630,7 @@ $("testPingBtn").onclick = () => {
       $("ntfyTrackStatus").textContent = "📡 test sent " + nowTime() + " ✓ — check the watch side now";
       trackLog("🔔 Test ping sent — it should appear on the watch side.");
     }catch(e){
-      $("ntfyTrackStatus").textContent = "📡 send FAILED: " + (e.message || e);
+      $("ntfyTrackStatus").textContent = "📡 send FAILED: " + ((e.message || e)) + ntfyFailHint(e);
       trackLog("❌ Test ping failed: " + (e.message || e));
     }
   }, e => { $("ntfyTrackStatus").textContent = "📡 GPS fix failed: " + ((e && e.message) || e); },
@@ -671,12 +719,22 @@ $("overlayOk").onclick = () => {
   document.title = "Pizza Run Tracker";
 };
 
+let wantWatch = false, watchRetryN = 0, watchRetryTimer = null;
+
 function connectWatch(){
   ensureAudio();
   const topic = $("watchTopic").value.trim();
   if(!topic){ $("watchStatus").textContent = "⚠️ Enter the alert channel (topic) first."; return; }
   cfg.topic = topic; saveCfg();
   disconnectWatch(true);
+  wantWatch = true; watchRetryN = 0;
+  openWatchStream(topic);
+}
+/* EventSource retries on its own every ~3 s forever — on a rate-limited
+   network that hot loop is exactly what keeps the limit tripped. So we close
+   it on error and reconnect ourselves with exponential backoff. */
+function openWatchStream(topic){
+  clearTimeout(watchRetryTimer);
   setConn(false, "Connecting…");
   $("watchStatus").textContent = "Listening on “" + topic + "”…";
   pollRecent(topic); /* catch up on anything published before we connected */
@@ -685,10 +743,32 @@ function connectWatch(){
   }catch(e){
     setConn(false, "Connection failed");
     $("watchStatus").textContent = "❌ Could not connect: " + e.message;
+    wantWatch = false;
     return;
   }
-  es.onopen = () => { setConn(true, "Connected — listening"); $("connectBtn").textContent = "⏹ Disconnect"; $("watchStatus").textContent = "✓ Live. Leave this page open for the alert."; };
-  es.onerror = () => { setConn(false, "Reconnecting…"); $("ntfyWatchStatus").textContent = "connection lost — retrying…"; };
+  es.onopen = () => {
+    watchRetryN = 0;
+    setConn(true, "Connected — listening");
+    $("connectBtn").textContent = "⏹ Disconnect";
+    $("watchStatus").textContent = "✓ Live. Leave this page open for the alert.";
+  };
+  es.onerror = () => {
+    try{ es.close(); }catch(e){}
+    es = null;
+    if(!wantWatch) return;
+    watchRetryN++;
+    if(watchRetryN > 6){
+      wantWatch = false;
+      setConn(false, "Not connected");
+      $("connectBtn").textContent = "🔌 Connect & listen";
+      $("watchStatus").textContent = "❌ Could not stay connected — tap Connect to try again.";
+      return;
+    }
+    const wait = Math.min(5000 * Math.pow(2, watchRetryN - 1), 60000);
+    setConn(false, "Reconnecting…");
+    $("watchStatus").textContent = "Connection lost — retrying in " + Math.round(wait/1000) + "s (attempt " + watchRetryN + "/6)";
+    watchRetryTimer = setTimeout(() => { if(wantWatch) openWatchStream(topic); }, wait);
+  };
   es.onmessage = e => handleNtfyPayload(e.data);
 }
 
@@ -744,6 +824,8 @@ async function pollRecent(topic){
   }catch(e){ $("ntfyWatchStatus").textContent = "catch-up failed (" + (e.name || "error") + ") • listening live only"; }
 }
 function disconnectWatch(silent){
+  wantWatch = false;
+  clearTimeout(watchRetryTimer);
   if(es){ try{ es.close(); }catch(e){} es = null; }
   $("connectBtn").textContent = "🔌 Connect & listen";
   if(!silent){ setConn(false, "Not connected"); $("watchStatus").textContent = "Disconnected."; }
