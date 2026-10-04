@@ -68,12 +68,15 @@
     <div class="card">
       <h3 style="margin:0 0 6px">How it works</h3>
       <ol class="howto">
-        <li>Pair the two sides — pick one direction: on the <b>track</b> phone tap <b>Copy watch link</b> and open it on the watcher's device, <b>or</b> on the <b>watch</b> side tap <b>Copy son's link</b> and send it to your son. Either way both sides land on the same private channel (shown as 📻 Channel on the track side).</li>
+        <li><b>One-time setup (~10 min):</b> go to <span class="mono">console.firebase.google.com</span>, sign in with Google, <b>Add project</b> (name it <span class="mono">pizza-tracker</span>, turn Analytics off), then left menu → <b>Realtime Database</b> → <b>Create Database</b> → <b>Start in test mode</b>. Open the <b>Rules</b> tab, replace everything with:<br>
+          <span class="mono small">{ "rules": { "pizza": { "$channel": { ".read": true, ".write": true } } } }</span><br>
+          and click <b>Publish</b> (don't skip — test-mode rules expire after 30 days, these don't). Copy the database URL from the <b>Data</b> tab and paste it into <b>Setup → Database URL</b> on your phone.</li>
+        <li>Pair the two sides — pick one direction: on the <b>track</b> phone tap <b>Copy watch link</b> and open it on the watcher's device, <b>or</b> on the <b>watch</b> side tap <b>Copy son's link</b> and send it to your son. Either way both sides land on the same private channel (shown as 📻 Channel on the track side) — the database address travels inside the link, so you only paste it once.</li>
         <li>Your son opens the track side — the school (St. Marguerite d'Youville) is already pinned — taps <b>Check GPS</b> to confirm a sharp fix, then <b>Start tracking</b> before leaving for lunch.</li>
         <li>When he leaves the school property you get a <b>“left school”</b> note; if he strays more than ~150 m off the usual walking route you get an <b>“off course”</b> warning; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
         <li>Keep the track page open on his phone until he arrives (it keeps the screen awake).</li>
       </ol>
-      <p class="muted small">Alerts travel through ntfy.sh on a random private channel — only someone with the link can see them. No accounts, no app install needed. While walking, his position sends about once a minute (the free alert service caps daily messages, so the app rations them — a whole trip uses ~25).</p>
+      <p class="muted small">Alerts travel through your own free Firebase database on a random private channel — only someone with the link can see them. No message caps, no accounts on the phones, no app install needed. One-time setup below takes about 10 minutes.</p>
     </div>
   </section>
 
@@ -83,7 +86,7 @@
       <div class="phase idle" id="phaseLabel">Not tracking</div>
       <div class="small muted" id="statusLine">Press Start tracking before leaving school.</div>
       <div class="small" style="margin-top:6px">📻 Channel: <b class="mono" id="trackChannel"></b><br><span class="muted">The watch side must use this exact channel.</span></div>
-      <div class="small mono" id="ntfyTrackStatus" style="margin-top:4px"></div>
+      <div class="small mono" id="dbTrackStatus" style="margin-top:4px"></div>
       <div class="row" style="margin-top:10px">
         <button class="bigbtn start" id="startBtn">▶ Start tracking</button>
       </div>
@@ -105,7 +108,13 @@
       <summary>⚙️ Setup (do once)</summary>
       <div class="small muted" id="schoolCoords"></div>
       <div class="small muted" style="margin-top:6px">Both locations and their alert zones are fixed — nothing here can be moved from this phone.</div>
-      <label>Alert channel (ntfy topic) — same on both phones</label>
+      <label>Database URL (your free Firebase database — one-time setup)</label>
+      <div class="row">
+        <input type="text" id="dbUrlInput" class="mono" spellcheck="false" autocomplete="off"
+               placeholder="https://your-project-default-rtdb.firebaseio.com">
+      </div>
+      <div class="small muted">One-time: create a free database at console.firebase.google.com (see How it works on the home screen), paste its URL here. It's saved on this phone and shared automatically through the pairing links below.</div>
+      <label>Alert channel — same on both phones</label>
       <div class="row">
         <input type="text" id="topicInput" class="mono" spellcheck="false" autocomplete="off">
         <button class="bigbtn ghost" id="regenTopic" style="flex:0 0 auto;font-size:14px;padding:10px">🎲</button>
@@ -116,7 +125,7 @@
       <div class="row" style="margin-top:8px">
         <button class="bigbtn blue" id="copyWatchLink" style="font-size:15px;padding:10px">👀 Copy watch link (for the watcher's device)</button>
       </div>
-      <div class="small muted" id="ntfyStatus"></div>
+      <div class="small muted" id="dbStatus"></div>
     </details>
     <div class="card">
       <h3 style="margin:0 0 6px">Good to know</h3>
@@ -136,7 +145,7 @@
       <div class="row">
         <span><span class="dot off" id="connDot"></span><b id="connLabel">Not connected</b></span>
       </div>
-      <label>Alert channel (ntfy topic) — must match the track phone</label>
+      <label>Alert channel — must match the track phone</label>
       <div class="row">
         <input type="text" id="watchTopic" class="mono" spellcheck="false" autocomplete="off">
       </div>
@@ -149,8 +158,9 @@
       </div>
       <div class="small muted" id="watchPairStatus"></div>
       <div class="small muted" id="watchStatus">Connect to start receiving live updates.</div>
-      <div class="small mono" id="ntfyWatchStatus" style="margin-top:4px"></div>
+      <div class="small mono" id="dbWatchStatus" style="margin-top:4px"></div>
       <div class="small" style="margin-top:6px">Last seen: <b id="lastSeen">—</b></div>
+      <div class="small" id="staleWarn" style="margin-top:4px;color:#b06000;font-weight:700"></div>
     </div>
     <div class="card">
       <div id="watchMap"></div>
@@ -243,7 +253,7 @@ function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,15
 
 /* ================= config ================= */
 const LS_KEY = "pizzaTracker.v2";
-const BUILD = "2026-10-04h"; /* visible in the footer — confirms which version a phone runs */
+const BUILD = "2026-10-04i"; /* visible in the footer — confirms which version a phone runs */
 const PIZZA_DEFAULT = { lat: 43.48849, lng: -79.69802, radius: 100,
                         name: "Big Taste Pizza — 2165 Grosvenor St, Oakville (beside Iroquois Ridge HS)" };
 const SCHOOL_DEFAULT = { lat: 43.4942050, lng: -79.6937659, radius: 150,
@@ -261,7 +271,7 @@ function randTopic(){
   return s;
 }
 function defaultCfg(){
-  return { topic: randTopic(),
+  return { topic: randTopic(), dbUrl: "",
            school: { lat:SCHOOL_DEFAULT.lat, lng:SCHOOL_DEFAULT.lng, radius:150 },
            pizza:  { lat:PIZZA_DEFAULT.lat, lng:PIZZA_DEFAULT.lng, radius:100 } };
 }
@@ -286,7 +296,7 @@ function parseHash(){
   const qi = h.indexOf("?");
   const mode = (qi >= 0 ? h.slice(0, qi) : h).toLowerCase();
   const params = new URLSearchParams(qi >= 0 ? h.slice(qi+1) : "");
-  return { mode, topic: params.get("topic") };
+  return { mode, topic: params.get("topic"), db: params.get("db") };
 }
 function currentMode(){ const {mode} = parseHash(); return (mode === "track" || mode === "watch") ? mode : "home"; }
 function showMode(){
@@ -300,7 +310,11 @@ function showMode(){
 }
 window.addEventListener("hashchange", () => { adoptTopicFromHash(); showMode(); });
 function adoptTopicFromHash(){
-  const {topic} = parseHash();
+  const {topic, db} = parseHash();
+  if(db && db !== cfg.dbUrl){
+    cfg.dbUrl = db;
+    saveCfg(); syncTopicInputs();
+  }
   if(topic && topic !== cfg.topic){
     cfg.topic = topic;
     saveCfg(); syncTopicInputs();
@@ -312,42 +326,41 @@ $("goWatch").onclick = () => location.hash = "#watch";
 $("backHome1").onclick = () => location.hash = "";
 $("backHome2").onclick = () => location.hash = "";
 
-/* ================= ntfy ================= */
-async function ntfyPost(topic, body, opts){
-  opts = opts || {};
-  const headers = {};
-  if(opts.title) headers["Title"] = opts.title;
-  if(opts.tags) headers["Tags"] = opts.tags;
-  if(opts.priority) headers["Priority"] = String(opts.priority);
-  const url = "https://ntfy.sh/" + encodeURIComponent(topic);
-  const send = async (h) => {
-    const r = await fetch(url, { method:"POST", headers:h, body });
-    if(!r.ok){
-      /* Surface ntfy's own reason (e.g. which rate limit was hit). */
-      let detail = "";
-      try{ detail = (await r.text()).slice(0, 180); }catch(e){}
-      const err = new Error("ntfy " + r.status + (detail ? ": " + detail : ""));
-      err.status = r.status;
-      throw err;
-    }
-    return r;
-  };
-  try{
-    return await send(headers);
-  }catch(e){
-    if(Object.keys(headers).length && !e.status){
-      /* Some strict networks block the preflight that custom headers trigger;
-         retry as a plain POST with no custom headers. (Never retry a 429 —
-         that only digs the hole deeper.) */
-      return await send({});
-    }
-    throw e;
-  }
+/* ============ Firebase Realtime Database transport ============
+   One-time setup: paste your database URL in Setup (see How it works).
+   No API key needed — the rules you published allow open access under /pizza/,
+   and the random channel name keeps each family private.
+   Free tier: 100 simultaneous connections, 10 GB/month — a trip uses almost none. */
+function fbBase(){
+  const u = (cfg.dbUrl || "").trim().replace(/\/+$/, "");
+  return u ? u + "/pizza/" + encodeURIComponent(cfg.topic) : null;
 }
-function ntfyFailHint(e){
+async function fbPut(path, data){
+  const b = fbBase();
+  if(!b){ const e = new Error("no-db"); throw e; }
+  const r = await fetch(b + path + ".json", {method:"PUT", body:JSON.stringify(data)});
+  if(!r.ok) throw new Error("database " + r.status);
+  return r.json();
+}
+async function fbPost(path, data){
+  const b = fbBase();
+  if(!b){ const e = new Error("no-db"); throw e; }
+  const r = await fetch(b + path + ".json", {method:"POST", body:JSON.stringify(data)});
+  if(!r.ok) throw new Error("database " + r.status);
+  return r.json();
+}
+async function fbGet(path){
+  const b = fbBase();
+  if(!b){ const e = new Error("no-db"); throw e; }
+  const r = await fetch(b + path + ".json");
+  if(!r.ok) throw new Error("database " + r.status);
+  return r.json();
+}
+function fbFailHint(e){
   const msg = (e && e.message) || String(e);
+  if(msg === "no-db") return " — paste your Database URL in Setup first (one-time)";
   return /failed to fetch|networkerror|load failed/i.test(msg)
-    ? " — the phone can't reach the alert server (try turning WiFi off and use mobile data)"
+    ? " — the phone can't reach the database (check WiFi)"
     : "";
 }
 
@@ -358,8 +371,7 @@ let trackMap = null, schoolMarker = null, schoolCircle = null,
 const T = { active:false, phase:"idle", watchId:null, wakeLock:null,
             lastFix:null, leftCount:0, lastPing:0, lastPingPos:null, phasePushed:"",
             offCount:0, offCourse:false, routeInfo:"" };
-let rateLimitedUntil = 0;   /* set for 60 s after any 429: sends pause instead of hammering */
-let testCooldownUntil = 0;  /* test button: one tap per 15 s so it can't trip the burst limit */
+let testCooldownUntil = 0;  /* test button: one tap per 15 s */
 
 function trackLog(msg){
   const li = document.createElement("li");
@@ -376,7 +388,13 @@ function syncTopicInputs(){
   $("topicInput").value = cfg.topic;
   $("watchTopic").value = cfg.topic;
   $("trackChannel").textContent = cfg.topic;
+  $("dbUrlInput").value = cfg.dbUrl || "";
 }
+$("dbUrlInput").onchange = e => {
+  cfg.dbUrl = e.target.value.trim().replace(/\/+$/, "");
+  saveCfg(); syncTopicInputs();
+  if(cfg.dbUrl) trackLog("✓ Database connected.");
+};
 function refreshSetupLabels(){
   $("schoolCoords").textContent = "🏫 " + SCHOOL_DEFAULT.name + " — " +
     cfg.school.lat.toFixed(5) + ", " + cfg.school.lng.toFixed(5) +
@@ -545,8 +563,8 @@ function onTrackFix(pos){
     if(T.leftCount >= 2){
       setPhase("enroute", "Left school — en route 🍕");
       trackLog("🏫 Left school property — heading out for lunch.");
-      ntfyPost(cfg.topic, "🏫 Left school — heading out for lunch",
-               {title:"Pizza Run Tracker", tags:"school"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
+      fbPost("/evts", {kind:"left", text:"🏫 Left school — heading out for lunch", t:Date.now()})
+        .catch(e => trackLog("⚠️ alert send failed: " + e.message));
     }
   } else if(T.phase === "enroute"){
     const dRoute = distToRoute(lat, lng);
@@ -556,8 +574,10 @@ function onTrackFix(pos){
       if(!T.offCourse && T.offCount >= 3){
         T.offCourse = true;
         trackLog("⚠️ Off the usual route (" + Math.round(dRoute) + "m off course).");
-        ntfyPost(cfg.topic, "⚠️ Off the usual route to Big Taste Pizza (" + Math.round(dRoute) + "m off course)",
-                 {title:"Pizza Run Tracker", tags:"warning"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
+        fbPost("/evts", {kind:"offcourse",
+                text:"⚠️ Off the usual route to Big Taste Pizza (" + Math.round(dRoute) + "m off course)",
+                t:Date.now()})
+          .catch(e => trackLog("⚠️ alert send failed: " + e.message));
       }
     } else {
       T.offCount = 0;
@@ -567,8 +587,8 @@ function onTrackFix(pos){
       setPhase("arrived", "Arrived at Big Taste Pizza 🍕");
       trackLog("🍕 Arrived at Big Taste Pizza!");
       playAlertSound(); vibrate();
-      ntfyPost(cfg.topic, "🍕 Arrived at Big Taste Pizza!",
-               {title:"Pizza Run Tracker", tags:"pizza"}).catch(e => trackLog("⚠️ alert send failed: " + e.message));
+      fbPost("/evts", {kind:"arrived", text:"🍕 Arrived at Big Taste Pizza!", t:Date.now()})
+        .catch(e => trackLog("⚠️ alert send failed: " + e.message));
       $("rearmBtn").disabled = false;
     }
   }
@@ -578,81 +598,76 @@ function onTrackFix(pos){
   if(T.phase === "enroute" && T.routeInfo)
     $("statusLine").textContent += " • " + T.routeInfo;
 
-  /* The free alert service allows ~250 messages/day per network, so position
-     pings are rationed: only while enroute, at most every 60 s, or sooner if
-     he actually moved (>25 m and at least 15 s since the last ping). A whole
-     lunch trip costs ~25 messages. Phase changes always send immediately. */
+  /* Position pings: only while enroute, at most every 60 s, or sooner if he
+     actually moved (>25 m and at least 15 s since the last ping). Phase
+     changes always send immediately. */
   const now = Date.now();
   const movedM = T.lastPingPos ? distM(lat, lng, T.lastPingPos.lat, T.lastPingPos.lng) : Infinity;
-  const due = T.phase === "enroute" && Date.now() >= rateLimitedUntil &&
+  const due = T.phase === "enroute" &&
     (now - T.lastPing > 60000 || (movedM > 25 && now - T.lastPing > 15000) ||
      T.phasePushed !== T.phase);
   if(due){
     T.lastPing = now; T.lastPingPos = {lat, lng}; T.phasePushed = T.phase;
-    ntfyPost(cfg.topic,
-      JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
-                      acc:Math.round(acc), phase:T.phase, t:now}),
-      {priority:1})
-      .then(()=>{ $("ntfyTrackStatus").textContent = "📡 position sent " + nowTime() + " ✓"; })
-      .catch(e=>{
-        if(e && e.status === 429){
-          /* Back off a full minute instead of hammering — retrying a rate
-             limit is what keeps it tripped. */
-          rateLimitedUntil = Date.now() + 60000;
-          $("ntfyTrackStatus").textContent = "📡 rate limited — pausing sends for 60s";
-        } else {
-          $("ntfyTrackStatus").textContent = "📡 send FAILED: " + (e.message || e) + ntfyFailHint(e);
-        }
-      });
+    fbPut("/loc", {lat:+lat.toFixed(6), lng:+lng.toFixed(6),
+                   acc:Math.round(acc), phase:T.phase, t:now})
+      .then(()=>{ $("dbTrackStatus").textContent = "📡 position sent " + nowTime() + " ✓"; })
+      .catch(e=>{ $("dbTrackStatus").textContent = "📡 send FAILED: " + (e.message || e) + fbFailHint(e); });
   }
 }
 
-/* One-tap pipe test: sends a position + a visible test message right now,
-   and reports exactly what happened. */
+/* One-tap pipe test: writes a ping to the database and reads it straight back.
+   A matching echo proves the whole round trip works — no second device needed. */
 $("testPingBtn").onclick = () => {
   ensureAudio();
   if(Date.now() < testCooldownUntil){
-    $("ntfyTrackStatus").textContent = "⏳ one test at a time — wait a few seconds (rapid taps trip the send limit)";
+    $("dbTrackStatus").textContent = "⏳ one test at a time — wait a few seconds";
     return;
   }
   testCooldownUntil = Date.now() + 15000;
-  if(!("geolocation" in navigator)){ $("ntfyTrackStatus").textContent = "📡 Geolocation not available."; return; }
-  $("ntfyTrackStatus").textContent = "📡 getting GPS fix…";
-  navigator.geolocation.getCurrentPosition(async p => {
-    const lat = p.coords.latitude, lng = p.coords.longitude, acc = p.coords.accuracy || 999;
-    try{
-      await ntfyPost(cfg.topic,
-        JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
-                        acc:Math.round(acc), phase:"test", t:Date.now()}),
-        {priority:1});
-      await ntfyPost(cfg.topic, "🔔 Test ping from the track phone — if you see this, the link works",
-                     {title:"Pizza Run Tracker", tags:"test"});
-      $("ntfyTrackStatus").textContent = "📡 test sent " + nowTime() + " ✓ — check the watch side now";
-      trackLog("🔔 Test ping sent — it should appear on the watch side.");
-    }catch(e){
-      $("ntfyTrackStatus").textContent = "📡 send FAILED: " + ((e.message || e)) + ntfyFailHint(e);
-      trackLog("❌ Test ping failed: " + (e.message || e));
-    }
-  }, e => { $("ntfyTrackStatus").textContent = "📡 GPS fix failed: " + ((e && e.message) || e); },
-  {enableHighAccuracy:true, timeout:20000});
+  if(!fbBase()){ $("dbTrackStatus").textContent = "📡 Paste your Database URL in Setup first (one-time)."; return; }
+  $("dbTrackStatus").textContent = "📡 testing…";
+  const nonce = Math.random().toString(36).slice(2);
+  const finish = (ok, msg) => {
+    $("dbTrackStatus").textContent = msg;
+    trackLog(ok ? "🔔 Test echo OK — the database link works." : "❌ Test failed: " + msg.replace(/^📡 /, ""));
+  };
+  /* Also drop the current GPS fix (if any) so the watch side shows a dot. */
+  const putLoc = () => new Promise(resolve => {
+    if(!("geolocation" in navigator)) return resolve();
+    navigator.geolocation.getCurrentPosition(p => {
+      fbPut("/loc", {lat:+p.coords.latitude.toFixed(6), lng:+p.coords.longitude.toFixed(6),
+                     acc:Math.round(p.coords.accuracy || 999), phase:"test", t:Date.now()})
+        .then(resolve).catch(()=>resolve());
+    }, ()=>resolve(), {enableHighAccuracy:true, timeout:8000});
+  });
+  fbPut("/ping", {nonce, t:Date.now()})
+    .then(()=>putLoc())
+    .then(()=>fbGet("/ping"))
+    .then(d => {
+      if(d && d.nonce === nonce)
+        finish(true, "📡 test sent AND received back " + nowTime() + " ✓ — the link works");
+      else
+        finish(false, "📡 sent, but the echo didn't come back — try again");
+    })
+    .catch(e => finish(false, "📡 test FAILED: " + (e.message || e) + fbFailHint(e)));
 };
 $("topicInput").onchange   = e => { cfg.topic = e.target.value.trim() || randTopic(); saveCfg(); syncTopicInputs(); };
-$("regenTopic").onclick    = () => { cfg.topic = randTopic(); saveCfg(); syncTopicInputs(); $("ntfyStatus").textContent = "New channel created — copy the son's link again."; };
+$("regenTopic").onclick    = () => { cfg.topic = randTopic(); saveCfg(); syncTopicInputs(); $("dbStatus").textContent = "New channel created — copy the son's link again."; };
 $("copySonLink").onclick = async () => {
-  const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(cfg.topic);
-  try{ await navigator.clipboard.writeText(url); $("ntfyStatus").textContent = "✓ Son's link copied — text it to him."; }
-  catch(e){ $("ntfyStatus").textContent = "Copy this link: " + url; }
+  const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(cfg.topic) + "&db=" + encodeURIComponent(cfg.dbUrl || "");
+  try{ await navigator.clipboard.writeText(url); $("dbStatus").textContent = "✓ Son's link copied — text it to him."; }
+  catch(e){ $("dbStatus").textContent = "Copy this link: " + url; }
 };
 $("copyWatchLink").onclick = async () => {
-  const url = location.href.split("#")[0] + "#watch?topic=" + encodeURIComponent(cfg.topic);
-  try{ await navigator.clipboard.writeText(url); $("ntfyStatus").textContent = "✓ Watch link copied — open it on the watcher's device."; }
-  catch(e){ $("ntfyStatus").textContent = "Copy this link: " + url; }
+  const url = location.href.split("#")[0] + "#watch?topic=" + encodeURIComponent(cfg.topic) + "&db=" + encodeURIComponent(cfg.dbUrl || "");
+  try{ await navigator.clipboard.writeText(url); $("dbStatus").textContent = "✓ Watch link copied — open it on the watcher's device."; }
+  catch(e){ $("dbStatus").textContent = "Copy this link: " + url; }
 };
 
 /* ================= WATCH side ================= */
 let watchMap = null, wSchoolCircle = null, wPizzaCircle = null, wSonMarker = null, wSonAcc = null,
     wRouteLine = null;
-let es = null, seenIds = new Set(), sonState = null, lastSeenT = 0, titleFlashTimer = null,
+let sonState = null, lastSeenT = 0, lastPhase = "", titleFlashTimer = null,
     watchMsgCount = 0;
 
 function initWatchMap(){
@@ -720,129 +735,151 @@ $("overlayOk").onclick = () => {
 };
 
 let wantWatch = false, watchRetryN = 0, watchRetryTimer = null;
+let fbEs = null, seenEvtKeys = new Set();
 
 function connectWatch(){
   ensureAudio();
   const topic = $("watchTopic").value.trim();
-  if(!topic){ $("watchStatus").textContent = "⚠️ Enter the alert channel (topic) first."; return; }
+  if(!topic){ $("watchStatus").textContent = "\u26a0\ufe0f Enter the alert channel first."; return; }
   cfg.topic = topic; saveCfg();
+  if(!fbBase()){ $("watchStatus").textContent = "\u26a0\ufe0f Paste your Database URL in Setup first (one-time)."; return; }
   disconnectWatch(true);
   wantWatch = true; watchRetryN = 0;
-  openWatchStream(topic);
+  openWatchStream();
 }
-/* EventSource retries on its own every ~3 s forever — on a rate-limited
-   network that hot loop is exactly what keeps the limit tripped. So we close
-   it on error and reconnect ourselves with exponential backoff. */
-function openWatchStream(topic){
+
+async function openWatchStream(){
   clearTimeout(watchRetryTimer);
-  setConn(false, "Connecting…");
-  $("watchStatus").textContent = "Listening on “" + topic + "”…";
-  pollRecent(topic); /* catch up on anything published before we connected */
+  setConn(false, "Connecting\u2026");
+  $("watchStatus").textContent = "Listening\u2026";
+  /* Initial snapshot: picks up the latest position + any events that fired
+     before we connected (e.g. tracking started first, or the page reloaded). */
   try{
-    es = new EventSource("https://ntfy.sh/" + encodeURIComponent(topic) + "/sse");
+    const snap = await fbGet("");
+    if(snap) handleFbSnapshot(snap);
+    $("dbWatchStatus").textContent = "\u2713 loaded \u2022 listening live";
+  }catch(e){
+    $("watchStatus").textContent = "\u274c Couldn't reach the database: " + (e.message || e) + fbFailHint(e);
+    $("dbWatchStatus").textContent = "";
+  }
+  if(!wantWatch) return;
+  try{
+    fbEs = new EventSource(fbBase() + ".json");
   }catch(e){
     setConn(false, "Connection failed");
-    $("watchStatus").textContent = "❌ Could not connect: " + e.message;
+    $("watchStatus").textContent = "\u274c Could not connect: " + e.message;
     wantWatch = false;
     return;
   }
-  es.onopen = () => {
+  fbEs.onopen = () => {
     watchRetryN = 0;
-    setConn(true, "Connected — listening");
-    $("connectBtn").textContent = "⏹ Disconnect";
-    $("watchStatus").textContent = "✓ Live. Leave this page open for the alert.";
+    setConn(true, "Connected \u2014 listening");
+    $("connectBtn").textContent = "\u23f9 Disconnect";
+    $("watchStatus").textContent = "\u2713 Live. Leave this page open for the alert.";
   };
-  es.onerror = () => {
-    try{ es.close(); }catch(e){}
-    es = null;
+  fbEs.onerror = () => {
+    try{ fbEs.close(); }catch(e){}
+    fbEs = null;
     if(!wantWatch) return;
     watchRetryN++;
     if(watchRetryN > 6){
       wantWatch = false;
       setConn(false, "Not connected");
-      $("connectBtn").textContent = "🔌 Connect & listen";
-      $("watchStatus").textContent = "❌ Could not stay connected — tap Connect to try again.";
+      $("connectBtn").textContent = "\ud83d\udd0c Connect & listen";
+      $("watchStatus").textContent = "\u274c Could not stay connected \u2014 tap Connect to try again.";
       return;
     }
     const wait = Math.min(5000 * Math.pow(2, watchRetryN - 1), 60000);
-    setConn(false, "Reconnecting…");
-    $("watchStatus").textContent = "Connection lost — retrying in " + Math.round(wait/1000) + "s (attempt " + watchRetryN + "/6)";
-    watchRetryTimer = setTimeout(() => { if(wantWatch) openWatchStream(topic); }, wait);
+    setConn(false, "Reconnecting\u2026");
+    $("watchStatus").textContent = "Connection lost \u2014 retrying in " + Math.round(wait/1000) + "s (attempt " + watchRetryN + "/6)";
+    watchRetryTimer = setTimeout(() => { if(wantWatch) openWatchStream(); }, wait);
   };
-  es.onmessage = e => handleNtfyPayload(e.data);
+  /* Firebase sends named "put" events: {path:"/loc"|"/evts/<key>"|"/", data:{...}} */
+  fbEs.addEventListener("put", e => {
+    let m;
+    try{ m = JSON.parse(e.data); }catch(err){ return; }
+    if(!m || typeof m.path !== "string") return;
+    if(m.path === "/" && m.data && typeof m.data === "object"){ handleFbSnapshot(m.data); return; }
+    if(m.path === "/loc" && m.data){ handleLoc(m.data); return; }
+    if(m.path.indexOf("/evts/") === 0 && m.data){
+      const key = m.path.slice(6);
+      if(!seenEvtKeys.has(key)){ seenEvtKeys.add(key); handleEvt(m.data, false); }
+    }
+  });
 }
 
-function handleNtfyPayload(data){
-  let outer;
-  try{ outer = JSON.parse(data); }catch(err){ return; }
-  if(!outer || outer.id == null || seenIds.has(outer.id)) return;
-  seenIds.add(outer.id);
-  watchMsgCount++;
-  $("ntfyWatchStatus").textContent = "📥 " + watchMsgCount + " message(s) received • last " + nowTime();
-  const body = outer.message || "";
-  const when = outer.time ? outer.time * 1000 : null;
-  let obj = null;
-  try{ obj = JSON.parse(body); }catch(err){}
-  if(obj && obj.type === "loc" && Number.isFinite(obj.lat)){
-    sonState = obj; lastSeenT = obj.t || Date.now();
-    $("lastSeen").textContent = fmtAgo(Date.now() - lastSeenT) + " (" + obj.phase + ")";
-    if(watchMap){
-      const ll = [obj.lat, obj.lng];
-      if(!wSonMarker){
-        wSonMarker = L.circleMarker(ll, {radius:10, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(watchMap);
-        wSonAcc = L.circle(ll, {radius:Math.min(obj.acc||100,500), color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08}).addTo(watchMap);
-        watchMap.setView(ll, 15);
-      } else {
-        wSonMarker.setLatLng(ll);
-        wSonAcc.setLatLng(ll).setRadius(Math.min(obj.acc||100,500));
-      }
+function handleFbSnapshot(snap){
+  if(snap.loc) handleLoc(snap.loc);
+  if(snap.evts && typeof snap.evts === "object"){
+    const keys = Object.keys(snap.evts).sort();
+    for(const k of keys){
+      if(!seenEvtKeys.has(k)){ seenEvtKeys.add(k); handleEvt(snap.evts[k], true); }
     }
-  } else if(body && body.trim()){
-    const text = body.trim();
-    const isArrival = /arriv/i.test(text) && /pizza/i.test(text);
-    watchLog(text, isArrival, when);
-    if(isArrival) showArrivalOverlay();
-    else if(/left school/i.test(text)){ playAlertSound(); vibrate(); }
   }
 }
 
-/* Pick up anything published before we connected (e.g. tracking was started
-   first, or the page reloaded): ntfy keeps recent messages per topic. */
-async function pollRecent(topic){
-  $("ntfyWatchStatus").textContent = "catch-up: asking ntfy for recent messages…";
-  try{
-    const ctl = new AbortController();
-    const timer = setTimeout(()=>ctl.abort(), 12000);
-    const r = await fetch("https://ntfy.sh/" + encodeURIComponent(topic) + "/json?since=2h",
-                          {signal:ctl.signal});
-    clearTimeout(timer);
-    if(!r.ok){ $("ntfyWatchStatus").textContent = "catch-up: ntfy said " + r.status + " • listening live only"; return; }
-    const text = await r.text();
-    let n = 0;
-    for(const line of text.split("\n")) if(line.trim()){ handleNtfyPayload(line); n++; }
-    $("ntfyWatchStatus").textContent = "catch-up: " + n + " message(s) • now listening live";
-  }catch(e){ $("ntfyWatchStatus").textContent = "catch-up failed (" + (e.name || "error") + ") • listening live only"; }
+function handleLoc(obj){
+  if(!obj || !Number.isFinite(obj.lat)) return;
+  sonState = obj; lastSeenT = obj.t || Date.now(); lastPhase = obj.phase || "";
+  watchMsgCount++;
+  $("dbWatchStatus").textContent = "\ud83d\udce5 live \u2022 last update " + nowTime();
+  $("lastSeen").textContent = fmtAgo(Date.now() - lastSeenT) + " (" + (obj.phase || "?") + ")";
+  if(watchMap){
+    const ll = [obj.lat, obj.lng];
+    if(!wSonMarker){
+      wSonMarker = L.circleMarker(ll, {radius:10, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(watchMap);
+      wSonAcc = L.circle(ll, {radius:Math.min(obj.acc||100,500), color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08}).addTo(watchMap);
+      watchMap.setView(ll, 15);
+    } else {
+      wSonMarker.setLatLng(ll);
+      wSonAcc.setLatLng(ll).setRadius(Math.min(obj.acc||100,500));
+    }
+  }
+}
+
+/* quiet=true for old events loaded from the snapshot: they go in the
+   timeline but don't fire sounds/popups again. Recent ones (<30 min) still alert. */
+function handleEvt(evt, quiet){
+  if(!evt || !evt.text) return;
+  watchMsgCount++;
+  $("dbWatchStatus").textContent = "\ud83d\udce5 live \u2022 last update " + nowTime();
+  const kind = evt.kind || "";
+  const isArrival = kind === "arrived";
+  const recent = evt.t && (Date.now() - evt.t < 30*60*1000);
+  watchLog(evt.text, isArrival, evt.t);
+  if(quiet && !recent) return;
+  if(isArrival) showArrivalOverlay();
+  else if(kind === "left"){ playAlertSound(); vibrate(); }
 }
 function disconnectWatch(silent){
   wantWatch = false;
   clearTimeout(watchRetryTimer);
-  if(es){ try{ es.close(); }catch(e){} es = null; }
+  if(fbEs){ try{ fbEs.close(); }catch(e){} fbEs = null; }
   $("connectBtn").textContent = "🔌 Connect & listen";
   if(!silent){ setConn(false, "Not connected"); $("watchStatus").textContent = "Disconnected."; }
 }
-$("connectBtn").onclick = () => es ? disconnectWatch() : connectWatch();
+$("connectBtn").onclick = () => fbEs ? disconnectWatch() : connectWatch();
 $("testAlertBtn").onclick = () => { ensureAudio(); playAlertSound(); vibrate(); watchLog("🔔 Test alert — if you heard it and felt it, you're all set."); };
 $("watchTopic").onchange = e => { if(e.target.value.trim()){ cfg.topic = e.target.value.trim(); saveCfg(); } };
 $("copySonLinkW").onclick = async () => {
   ensureAudio();
   const topic = $("watchTopic").value.trim() || cfg.topic;
   cfg.topic = topic; saveCfg(); syncTopicInputs();
-  const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(topic);
+  const url = location.href.split("#")[0] + "#track?topic=" + encodeURIComponent(topic) + "&db=" + encodeURIComponent(cfg.dbUrl || "");
   try{ await navigator.clipboard.writeText(url); $("watchPairStatus").textContent = "✓ Son's link copied — text it to him."; }
   catch(e){ $("watchPairStatus").textContent = "Copy this link: " + url; }
 };
 setInterval(() => {
-  if(lastSeenT) $("lastSeen").textContent = fmtAgo(Date.now() - lastSeenT);
+  if(lastSeenT){
+    const age = Date.now() - lastSeenT;
+    $("lastSeen").textContent = fmtAgo(age) + (lastPhase ? " (" + lastPhase + ")" : "");
+    /* Safety net: if the track tab gets closed, the dot goes stale silently —
+       warn loudly instead. */
+    $("staleWarn").textContent =
+      (age > 180000 && lastPhase !== "" && lastPhase !== "arrived")
+        ? "⚠️ No updates for " + fmtAgo(age) + " — the track page may have been closed."
+        : "";
+  }
 }, 5000);
 
 /* ================= init ================= */
