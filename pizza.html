@@ -539,10 +539,10 @@ function onTrackFix(pos){
   if(T.phase === "enroute" && T.routeInfo)
     $("statusLine").textContent += " • " + T.routeInfo;
 
-  // periodic location ping (silent: min priority)
+  // periodic location ping (silent: min priority) — every 25 s while tracking,
+  // even when standing still, so the watch side always has a live dot
   const now = Date.now();
-  const moved = !T.lastPingPos || distM(lat, lng, T.lastPingPos.lat, T.lastPingPos.lng) > 30;
-  if(now - T.lastPing > 25000 && (moved || T.phasePushed !== T.phase)){
+  if(now - T.lastPing > 25000 || T.phasePushed !== T.phase){
     T.lastPing = now; T.lastPingPos = {lat, lng}; T.phasePushed = T.phase;
     ntfyPost(cfg.topic,
       JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
@@ -599,12 +599,13 @@ function drawWatchPins(){
       [cfg.pizza.lat, cfg.pizza.lng], [sch0.lat, sch0.lng]).pad(0.35));
   }
 }
-function watchLog(msg, important){
+function watchLog(msg, important, when){
   const placeholder = $("watchLog").querySelector(".muted");
   if(placeholder) placeholder.remove();
   const li = document.createElement("li");
   if(important) li.style.fontWeight = "700";
-  li.innerHTML = '<span class="t">' + nowTime() + '</span>' + escapeHtml(msg);
+  const tstr = when ? new Date(when).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"}) : nowTime();
+  li.innerHTML = '<span class="t">' + tstr + '</span>' + escapeHtml(msg);
   $("watchLog").prepend(li);
 }
 function setConn(on, label){
@@ -636,6 +637,7 @@ function connectWatch(){
   disconnectWatch(true);
   setConn(false, "Connecting…");
   $("watchStatus").textContent = "Listening on “" + topic + "”…";
+  pollRecent(topic); /* catch up on anything published before we connected */
   try{
     es = new EventSource("https://ntfy.sh/" + encodeURIComponent(topic) + "/sse");
   }catch(e){
@@ -645,36 +647,54 @@ function connectWatch(){
   }
   es.onopen = () => { setConn(true, "Connected — listening"); $("connectBtn").textContent = "⏹ Disconnect"; $("watchStatus").textContent = "✓ Live. Leave this page open for the alert."; };
   es.onerror = () => { setConn(false, "Reconnecting…"); };
-  es.onmessage = e => {
-    let outer;
-    try{ outer = JSON.parse(e.data); }catch(err){ return; }
-    if(!outer || outer.id == null || seenIds.has(outer.id)) return;
-    seenIds.add(outer.id);
-    const body = outer.message || "";
-    let obj = null;
-    try{ obj = JSON.parse(body); }catch(err){}
-    if(obj && obj.type === "loc" && Number.isFinite(obj.lat)){
-      sonState = obj; lastSeenT = Date.now();
-      $("lastSeen").textContent = "just now (" + obj.phase + ")";
-      if(watchMap){
-        const ll = [obj.lat, obj.lng];
-        if(!wSonMarker){
-          wSonMarker = L.circleMarker(ll, {radius:10, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(watchMap);
-          wSonAcc = L.circle(ll, {radius:Math.min(obj.acc||100,500), color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08}).addTo(watchMap);
-          watchMap.setView(ll, 15);
-        } else {
-          wSonMarker.setLatLng(ll);
-          wSonAcc.setLatLng(ll).setRadius(Math.min(obj.acc||100,500));
-        }
+  es.onmessage = e => handleNtfyPayload(e.data);
+}
+
+function handleNtfyPayload(data){
+  let outer;
+  try{ outer = JSON.parse(data); }catch(err){ return; }
+  if(!outer || outer.id == null || seenIds.has(outer.id)) return;
+  seenIds.add(outer.id);
+  const body = outer.message || "";
+  const when = outer.time ? outer.time * 1000 : null;
+  let obj = null;
+  try{ obj = JSON.parse(body); }catch(err){}
+  if(obj && obj.type === "loc" && Number.isFinite(obj.lat)){
+    sonState = obj; lastSeenT = obj.t || Date.now();
+    $("lastSeen").textContent = fmtAgo(Date.now() - lastSeenT) + " (" + obj.phase + ")";
+    if(watchMap){
+      const ll = [obj.lat, obj.lng];
+      if(!wSonMarker){
+        wSonMarker = L.circleMarker(ll, {radius:10, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(watchMap);
+        wSonAcc = L.circle(ll, {radius:Math.min(obj.acc||100,500), color:"#1a73e8", weight:1, opacity:.4, fillOpacity:.08}).addTo(watchMap);
+        watchMap.setView(ll, 15);
+      } else {
+        wSonMarker.setLatLng(ll);
+        wSonAcc.setLatLng(ll).setRadius(Math.min(obj.acc||100,500));
       }
-    } else if(body && body.trim()){
-      const text = body.trim();
-      const isArrival = /arriv/i.test(text) && /pizza/i.test(text);
-      watchLog(text, isArrival);
-      if(isArrival) showArrivalOverlay();
-      else if(/left school/i.test(text)){ playAlertSound(); vibrate(); }
     }
-  };
+  } else if(body && body.trim()){
+    const text = body.trim();
+    const isArrival = /arriv/i.test(text) && /pizza/i.test(text);
+    watchLog(text, isArrival, when);
+    if(isArrival) showArrivalOverlay();
+    else if(/left school/i.test(text)){ playAlertSound(); vibrate(); }
+  }
+}
+
+/* Pick up anything published before we connected (e.g. tracking was started
+   first, or the page reloaded): ntfy keeps recent messages per topic. */
+async function pollRecent(topic){
+  try{
+    const ctl = new AbortController();
+    const timer = setTimeout(()=>ctl.abort(), 12000);
+    const r = await fetch("https://ntfy.sh/" + encodeURIComponent(topic) + "/json?since=2h",
+                          {signal:ctl.signal});
+    clearTimeout(timer);
+    if(!r.ok) return;
+    const text = await r.text();
+    for(const line of text.split("\n")) if(line.trim()) handleNtfyPayload(line);
+  }catch(e){ /* live SSE still covers new messages */ }
 }
 function disconnectWatch(silent){
   if(es){ try{ es.close(); }catch(e){} es = null; }
