@@ -68,9 +68,7 @@
     <div class="card">
       <h3 style="margin:0 0 6px">How it works</h3>
       <ol class="howto">
-        <li><b>One-time setup (~10 min):</b> go to <span class="mono">console.firebase.google.com</span>, sign in with Google, <b>Add project</b> (name it <span class="mono">pizza-tracker</span>, turn Analytics off), then left menu → <b>Realtime Database</b> → <b>Create Database</b> → <b>Start in test mode</b>. Open the <b>Rules</b> tab, replace everything with:<br>
-          <span class="mono small">{ "rules": { "pizza": { "$channel": { ".read": true, ".write": true } } } }</span><br>
-          and click <b>Publish</b> (don't skip — test-mode rules expire after 30 days, these don't). Copy the database URL from the <b>Data</b> tab and paste it into <b>Setup → Database URL</b> on your phone.</li>
+        <li><b>Database:</b> already set up — the app ships with the family's database built in. Nothing to create, nothing to paste.</li>
         <li>Pair the two sides — pick one direction: on the <b>track</b> phone tap <b>Copy watch link</b> and open it on the watcher's device, <b>or</b> on the <b>watch</b> side tap <b>Copy son's link</b> and send it to your son. Either way both sides land on the same private channel (shown as 📻 Channel on the track side) — the database address travels inside the link, so you only paste it once.</li>
         <li>Your son opens the track side — the school (St. Marguerite d'Youville) is already pinned — taps <b>Check GPS</b> to confirm a sharp fix, then <b>Start tracking</b> before leaving for lunch.</li>
         <li>When he leaves the school property you get a <b>“left school”</b> note; if he strays more than ~150 m off the usual walking route you get an <b>“off course”</b> warning; when he reaches <b>Big Taste Pizza</b> your phone <b>sounds, vibrates and pops up</b> 🍕.</li>
@@ -113,7 +111,7 @@
         <input type="text" id="dbUrlInput" class="mono" spellcheck="false" autocomplete="off"
                placeholder="https://your-project-default-rtdb.firebaseio.com">
       </div>
-      <div class="small muted">One-time: create a free database at console.firebase.google.com (see How it works on the home screen), paste its URL here. It's saved on this phone and shared automatically through the pairing links below.</div>
+      <div class="small muted">Pre-configured — the family's database is built in, so this usually needs no touch. Only change it if you ever move to a different database; it's saved on this phone and shared automatically through the pairing links below.</div>
       <label>Alert channel — same on both phones</label>
       <div class="row">
         <input type="text" id="topicInput" class="mono" spellcheck="false" autocomplete="off">
@@ -254,6 +252,9 @@ function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,15
 /* ================= config ================= */
 const LS_KEY = "pizzaTracker.v2";
 const BUILD = "2026-10-04i"; /* visible in the footer — confirms which version a phone runs */
+/* The family's Firebase database, set up once — baked in so neither phone
+   needs any manual setup. */
+const FIREBASE_DB_URL = "https://pizza-tracker-39d46-default-rtdb.firebaseio.com";
 const PIZZA_DEFAULT = { lat: 43.48849, lng: -79.69802, radius: 100,
                         name: "Big Taste Pizza — 2165 Grosvenor St, Oakville (beside Iroquois Ridge HS)" };
 const SCHOOL_DEFAULT = { lat: 43.4942050, lng: -79.6937659, radius: 150,
@@ -271,7 +272,7 @@ function randTopic(){
   return s;
 }
 function defaultCfg(){
-  return { topic: randTopic(), dbUrl: "",
+  return { topic: randTopic(), dbUrl: FIREBASE_DB_URL,
            school: { lat:SCHOOL_DEFAULT.lat, lng:SCHOOL_DEFAULT.lng, radius:150 },
            pizza:  { lat:PIZZA_DEFAULT.lat, lng:PIZZA_DEFAULT.lng, radius:100 } };
 }
@@ -284,6 +285,8 @@ function loadCfg(){
        always use the baked locations, keep only the topic from storage. */
     c.school = { lat:SCHOOL_DEFAULT.lat, lng:SCHOOL_DEFAULT.lng, radius:150 };
     c.pizza  = { lat:PIZZA_DEFAULT.lat, lng:PIZZA_DEFAULT.lng, radius:PIZZA_DEFAULT.radius };
+    /* Backfill the baked database URL for phones that saved an empty one. */
+    if(!c.dbUrl) c.dbUrl = FIREBASE_DB_URL;
     return c;
   }catch(e){ return defaultCfg(); }
 }
