@@ -82,11 +82,13 @@
     <div class="card">
       <div class="phase idle" id="phaseLabel">Not tracking</div>
       <div class="small muted" id="statusLine">Press Start tracking before leaving school.</div>
+      <div class="small mono" id="ntfyTrackStatus" style="margin-top:4px"></div>
       <div class="row" style="margin-top:10px">
         <button class="bigbtn start" id="startBtn">▶ Start tracking</button>
       </div>
       <div class="row">
         <button class="bigbtn ghost" id="gpsCheckBtn" style="font-size:15px;padding:10px">📡 Check GPS</button>
+        <button class="bigbtn ghost" id="testPingBtn" style="font-size:15px;padding:10px">🔔 Test ping</button>
       </div>
       <div class="small muted" id="gpsCheckLine" style="margin-bottom:4px"></div>
       <div class="row">
@@ -143,6 +145,7 @@
       </div>
       <div class="small muted" id="watchPairStatus"></div>
       <div class="small muted" id="watchStatus">Connect to start receiving live updates.</div>
+      <div class="small mono" id="ntfyWatchStatus" style="margin-top:4px"></div>
       <div class="small" style="margin-top:6px">Last seen: <b id="lastSeen">—</b></div>
     </div>
     <div class="card">
@@ -156,6 +159,8 @@
   </section>
 
 </main>
+
+<div class="muted small" style="text-align:center; padding:0 12px 24px" id="buildTag"></div>
 
 <!-- arrival overlay -->
 <div id="overlay" hidden>
@@ -234,6 +239,7 @@ function vibrate(){ try{ if(navigator.vibrate) navigator.vibrate([300,150,300,15
 
 /* ================= config ================= */
 const LS_KEY = "pizzaTracker.v2";
+const BUILD = "2026-10-04f"; /* visible in the footer — confirms which version a phone runs */
 const PIZZA_DEFAULT = { lat: 43.48849, lng: -79.69802, radius: 100,
                         name: "Big Taste Pizza — 2165 Grosvenor St, Oakville (beside Iroquois Ridge HS)" };
 const SCHOOL_DEFAULT = { lat: 43.4942050, lng: -79.6937659, radius: 150,
@@ -547,11 +553,36 @@ function onTrackFix(pos){
     ntfyPost(cfg.topic,
       JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
                       acc:Math.round(acc), phase:T.phase, t:now}),
-      {priority:1}).catch(()=>{});
+      {priority:1})
+      .then(()=>{ $("ntfyTrackStatus").textContent = "📡 position sent " + nowTime() + " ✓"; })
+      .catch(e=>{ $("ntfyTrackStatus").textContent = "📡 send FAILED: " + (e.message || e); });
   }
 }
 
-/* track setup controls */
+/* One-tap pipe test: sends a position + a visible test message right now,
+   and reports exactly what happened. */
+$("testPingBtn").onclick = () => {
+  ensureAudio();
+  if(!("geolocation" in navigator)){ $("ntfyTrackStatus").textContent = "📡 Geolocation not available."; return; }
+  $("ntfyTrackStatus").textContent = "📡 getting GPS fix…";
+  navigator.geolocation.getCurrentPosition(async p => {
+    const lat = p.coords.latitude, lng = p.coords.longitude, acc = p.coords.accuracy || 999;
+    try{
+      await ntfyPost(cfg.topic,
+        JSON.stringify({type:"loc", lat:+lat.toFixed(6), lng:+lng.toFixed(6),
+                        acc:Math.round(acc), phase:"test", t:Date.now()}),
+        {priority:1});
+      await ntfyPost(cfg.topic, "🔔 Test ping from the track phone — if you see this, the link works",
+                     {title:"Pizza Run Tracker", tags:"test"});
+      $("ntfyTrackStatus").textContent = "📡 test sent " + nowTime() + " ✓ — check the watch side now";
+      trackLog("🔔 Test ping sent — it should appear on the watch side.");
+    }catch(e){
+      $("ntfyTrackStatus").textContent = "📡 send FAILED: " + (e.message || e);
+      trackLog("❌ Test ping failed: " + (e.message || e));
+    }
+  }, e => { $("ntfyTrackStatus").textContent = "📡 GPS fix failed: " + ((e && e.message) || e); },
+  {enableHighAccuracy:true, timeout:20000});
+};
 $("topicInput").onchange   = e => { cfg.topic = e.target.value.trim() || randTopic(); saveCfg(); syncTopicInputs(); };
 $("regenTopic").onclick    = () => { cfg.topic = randTopic(); saveCfg(); syncTopicInputs(); $("ntfyStatus").textContent = "New channel created — copy the son's link again."; };
 $("copySonLink").onclick = async () => {
@@ -563,7 +594,8 @@ $("copySonLink").onclick = async () => {
 /* ================= WATCH side ================= */
 let watchMap = null, wSchoolCircle = null, wPizzaCircle = null, wSonMarker = null, wSonAcc = null,
     wRouteLine = null;
-let es = null, seenIds = new Set(), sonState = null, lastSeenT = 0, titleFlashTimer = null;
+let es = null, seenIds = new Set(), sonState = null, lastSeenT = 0, titleFlashTimer = null,
+    watchMsgCount = 0;
 
 function initWatchMap(){
   if(watchMap){ setTimeout(()=>watchMap.invalidateSize(), 50); drawWatchPins(); return; }
@@ -646,7 +678,7 @@ function connectWatch(){
     return;
   }
   es.onopen = () => { setConn(true, "Connected — listening"); $("connectBtn").textContent = "⏹ Disconnect"; $("watchStatus").textContent = "✓ Live. Leave this page open for the alert."; };
-  es.onerror = () => { setConn(false, "Reconnecting…"); };
+  es.onerror = () => { setConn(false, "Reconnecting…"); $("ntfyWatchStatus").textContent = "connection lost — retrying…"; };
   es.onmessage = e => handleNtfyPayload(e.data);
 }
 
@@ -655,6 +687,8 @@ function handleNtfyPayload(data){
   try{ outer = JSON.parse(data); }catch(err){ return; }
   if(!outer || outer.id == null || seenIds.has(outer.id)) return;
   seenIds.add(outer.id);
+  watchMsgCount++;
+  $("ntfyWatchStatus").textContent = "📥 " + watchMsgCount + " message(s) received • last " + nowTime();
   const body = outer.message || "";
   const when = outer.time ? outer.time * 1000 : null;
   let obj = null;
@@ -685,16 +719,19 @@ function handleNtfyPayload(data){
 /* Pick up anything published before we connected (e.g. tracking was started
    first, or the page reloaded): ntfy keeps recent messages per topic. */
 async function pollRecent(topic){
+  $("ntfyWatchStatus").textContent = "catch-up: asking ntfy for recent messages…";
   try{
     const ctl = new AbortController();
     const timer = setTimeout(()=>ctl.abort(), 12000);
     const r = await fetch("https://ntfy.sh/" + encodeURIComponent(topic) + "/json?since=2h",
                           {signal:ctl.signal});
     clearTimeout(timer);
-    if(!r.ok) return;
+    if(!r.ok){ $("ntfyWatchStatus").textContent = "catch-up: ntfy said " + r.status + " • listening live only"; return; }
     const text = await r.text();
-    for(const line of text.split("\n")) if(line.trim()) handleNtfyPayload(line);
-  }catch(e){ /* live SSE still covers new messages */ }
+    let n = 0;
+    for(const line of text.split("\n")) if(line.trim()){ handleNtfyPayload(line); n++; }
+    $("ntfyWatchStatus").textContent = "catch-up: " + n + " message(s) • now listening live";
+  }catch(e){ $("ntfyWatchStatus").textContent = "catch-up failed (" + (e.name || "error") + ") • listening live only"; }
 }
 function disconnectWatch(silent){
   if(es){ try{ es.close(); }catch(e){} es = null; }
@@ -717,6 +754,7 @@ setInterval(() => {
 }, 5000);
 
 /* ================= init ================= */
+$("buildTag").textContent = "build " + BUILD;
 syncTopicInputs();
 refreshSetupLabels();
 adoptTopicFromHash();
