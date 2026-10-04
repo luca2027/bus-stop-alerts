@@ -93,7 +93,7 @@
     </div>
     <div class="card">
       <div id="map"></div>
-      <p class="muted small" style="margin:8px 0 0">🏫 blue pin = school &nbsp;•&nbsp; 🍕 red pin = Big Taste Pizza &nbsp;•&nbsp; drag pins to adjust, or use the setup below.</p>
+      <p class="muted small" style="margin:8px 0 0">🏫 school pin (drag to fine-tune) &nbsp;•&nbsp; 🍕 Big Taste Pizza (locked in place)</p>
     </div>
     <details class="card" id="setupDetails">
       <summary>⚙️ Setup (do once)</summary>
@@ -386,14 +386,9 @@ function drawTrackPins(){
     schoolCircle.setLatLng([cfg.school.lat, cfg.school.lng]).setRadius(cfg.school.radius);
   }
   if(!pizzaMarker){
-    pizzaMarker = L.marker([cfg.pizza.lat, cfg.pizza.lng],
-                           {icon:pizzaIcon, draggable:true}).addTo(trackMap);
-    pizzaMarker.on("dragend", () => {
-      const p = pizzaMarker.getLatLng();
-      cfg.pizza.lat = +p.lat.toFixed(6); cfg.pizza.lng = +p.lng.toFixed(6);
-      saveCfg(); drawTrackPins();
-      trackLog("🍕 Pizza pin moved.");
-    });
+    /* Pizza pin is intentionally NOT draggable: its location is fixed and
+       verified, so it can't be moved (accidentally or otherwise) on the track phone. */
+    pizzaMarker = L.marker([cfg.pizza.lat, cfg.pizza.lng], {icon:pizzaIcon}).addTo(trackMap);
     pizzaMarker.bindPopup(escapeHtml(PIZZA_DEFAULT.name));
   } else pizzaMarker.setLatLng([cfg.pizza.lat, cfg.pizza.lng]);
   if(!pizzaCircle) pizzaCircle = L.circle([0,0], {color:"#d93025", weight:2, fillOpacity:.08}).addTo(trackMap);
